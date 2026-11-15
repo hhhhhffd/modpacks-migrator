@@ -102,7 +102,7 @@ const adapter = {
   },
 };
 async function getMigrator() {
-  if (!migrator) { const wasmUrl = new URL('/pkg/modpacks_migrator_wasm.js', self.location.origin).href; const wasm = await import(/* @vite-ignore */ wasmUrl) as Wasm; await wasm.default(); migrator = new wasm.BrowserMigrator(adapter); }
+  if (!migrator) { const wasmUrl = new URL(`${import.meta.env.BASE_URL}pkg/modpacks_migrator_wasm.js`, self.location.origin).href; const wasm = await import(/* @vite-ignore */ wasmUrl) as Wasm; await wasm.default(); migrator = new wasm.BrowserMigrator(adapter); }
   return migrator;
 }
 scope.onmessage = async ({ data }: MessageEvent<{ id: number; method: string; args: unknown[] }>) => {

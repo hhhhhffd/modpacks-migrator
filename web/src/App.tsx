@@ -252,7 +252,7 @@ export default function App() {
   const ticker = ['sodium', 'iris', 'lithium', 'fabric-api', 'modmenu', 'appleskin', 'jei', 'create', 'xaeros-minimap', 'cloth-config'];
   return <div className="app-shell">
     <header className="topbar page-width">
-      <a className="brand" href="/" aria-label="Modpack Migrator home"><span className="brand-mark"><Icon name="box" size={18} /></span><span>modpack<span className="brand-second">migrator</span></span></a>
+      <a className="brand" href={import.meta.env.BASE_URL} aria-label="Modpack Migrator home"><span className="brand-mark"><Icon name="box" size={18} /></span><span>modpack<span className="brand-second">migrator</span></span></a>
       <div className="header-actions">
         <button className="theme-toggle icon-button" aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`} onClick={toggleTheme}><Icon name={theme === 'dark' ? 'sun' : 'moon'} size={19} /></button>
         <nav aria-label="Project links"><a className="repo-link" href={repository} target="_blank" rel="noreferrer">Source on GitHub</a></nav>
