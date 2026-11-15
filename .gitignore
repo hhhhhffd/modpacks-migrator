@@ -1,0 +1,17 @@
+# Local credentials. Keep the example tracked.
+.env
+.env.*
+!.env.example
+
+# Rust and browser build outputs.
+/target/
+**/pkg/
+**/node_modules/
+**/dist/
+
+# Local job data, private archives, and machine-specific files.
+/.tmp/
+/.jobs/
+*.zip
+*.tar.gz
+.DS_Store
