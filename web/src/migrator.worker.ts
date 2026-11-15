@@ -58,6 +58,9 @@ const adapter = {
     const parsed = new URL(url);
     if (parsed.protocol !== 'https:') throw new Error('Only HTTPS provider requests are allowed.');
     const headers = new Headers(pairs);
+    // Firefox sends a manual User-Agent and preflights CDN GETs; the CDN rejects it.
+    // Let each browser supply its own User-Agent, as Chromium already does.
+    headers.delete('User-Agent');
     const hasKey = headers.has('x-api-key');
     if (hasKey && !['https://api.curseforge.com', 'https://edge.forgecdn.net'].includes(parsed.origin)) throw new Error('Credentials cannot be sent to this origin.');
     const generation = cacheGeneration;

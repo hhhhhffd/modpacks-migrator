@@ -41,6 +41,8 @@ The browser needs WebAssembly, dedicated workers, Fetch, FileReaderSync, and the
 
 A build-time key does not override CORS. If a provider API or CDN does not permit a readable cross-origin response, that operation cannot work in the standalone browser library. Errors are displayed; no proxy or CORS bypass is used. A generic browser network error does not by itself establish whether CORS, connectivity, TLS, or a provider restriction caused it.
 
+The browser transport deliberately drops the core's native `User-Agent` header and lets the browser supply it. Sending a custom `User-Agent` in Firefox triggers a CDN preflight that Modrinth does not allow (`Access-Control-Allow-Headers` only permits range headers); Chromium silently drops that header and can hide the bug. This is normal browser Fetch usage, not a CORS bypass. The Linux transport keeps its application `User-Agent`.
+
 Requests do not follow redirects automatically, so credentials cannot leak to redirect destinations. An unsupported redirect is reported as a failed operation. Linux downloads use a separately validated redirect flow.
 
 ## Prepare a signed `_k0t1k` launcher plugin
@@ -208,4 +210,12 @@ For a local archive smoke test against a running site:
 node scripts/browser-smoke.mjs /path/to/mods.zip 1.21.5
 ```
 
-This requires Chromium at `/usr/sbin/chromium` (or set `CHROMIUM_PATH`) with browser sandbox support. Evidence and downloaded results go into ignored `.tmp/`. Real user archives are never committed or included in CI fixtures.
+Chromium uses `/usr/sbin/chromium` (or `CHROMIUM_PATH`) with browser sandbox support. To check Firefox instead, install its Playwright binary and select it explicitly:
+
+```sh
+npm --prefix web exec -- playwright install firefox
+PLAYWRIGHT_BROWSER=firefox npm --prefix web run test:e2e
+PLAYWRIGHT_BROWSER=firefox node scripts/browser-smoke.mjs /path/to/mods.zip 26.1.1
+```
+
+Evidence and downloaded results go into ignored `.tmp/`. Real user archives are never committed or included in CI fixtures. Idle SDK disposal closes OPFS handles in their owning worker before termination so Firefox can release file locks cleanly.

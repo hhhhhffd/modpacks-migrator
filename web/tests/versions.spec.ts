@@ -18,7 +18,7 @@ test('loads grouped Minecraft versions and only permits catalog choices', async 
     releaseCatalog();
   }
   await expect(version).toBeEnabled();
-  await expect(version).toHaveJSProperty('tagName', 'SELECT');
+  await expect(page.locator('select[aria-label="Minecraft version"]')).toBeVisible();
   await expect(version).toHaveValue('');
   await expect(version.locator('option:checked')).toHaveText('Choose a version');
   await expect(version.locator('optgroup[label="Releases"] option')).toContainText(['1.21.5', '1.21.1', '1.20.1']);

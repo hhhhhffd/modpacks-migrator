@@ -1,4 +1,4 @@
-import { chromium } from '../web/node_modules/playwright/index.mjs';
+import { chromium, firefox } from '../web/node_modules/playwright/index.mjs';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 
@@ -8,7 +8,11 @@ const target = process.argv[3] || '1.21.5';
 const root = resolve('.tmp');
 await mkdir(root, { recursive: true });
 const output = await mkdtemp(join(root, 'browser-smoke-'));
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/sbin/chromium', headless: true, chromiumSandbox: true, args: ['--disable-dev-shm-usage'] });
+const browserName = process.env.PLAYWRIGHT_BROWSER || 'chromium';
+if (!['chromium', 'firefox'].includes(browserName)) throw new Error('PLAYWRIGHT_BROWSER must be chromium or firefox.');
+const browser = browserName === 'firefox'
+  ? await firefox.launch({ headless: true })
+  : await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/sbin/chromium', headless: true, chromiumSandbox: true, args: ['--disable-dev-shm-usage'] });
 const failures = [];
 const pageErrors = [];
 const responses = new Map();

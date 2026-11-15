@@ -19,6 +19,8 @@ export class Migrator {
   private worker!: Worker;
   private directoryName = '';
   private nextId = 0;
+  private disposed = false;
+  private workerFailed = false;
   private pending = new Map<number, { resolve(value: unknown): void; reject(reason: Error): void }>();
   onprogress?: (progress: Progress) => void;
   constructor() { this.startWorker(); }
@@ -33,9 +35,11 @@ export class Migrator {
       if (data.error) pending.reject(Object.assign(new Error(data.error.message), { code: data.error.code }));
       else pending.resolve(data.result);
     };
-    this.worker.onerror = () => this.rejectAll(new Error('The migration worker stopped unexpectedly.'));
+    this.workerFailed = false;
+    this.worker.onerror = () => { this.workerFailed = true; this.rejectAll(new Error('The migration worker stopped unexpectedly.')); };
   }
   private call<T>(method: string, args: unknown[] = []): Promise<T> {
+    if (this.disposed) return Promise.reject(new Error('Migrator disposed.'));
     const id = ++this.nextId;
     return new Promise((resolve, reject) => { this.pending.set(id, { resolve: value => resolve(value as T), reject }); this.worker.postMessage({ id, method, args }); });
   }
@@ -50,8 +54,17 @@ export class Migrator {
     if (name) { const root = await navigator.storage.getDirectory(); await root.removeEntry(name, { recursive: true }); }
   }
   async cancel() {
+    if (this.disposed) throw new Error('Migrator disposed.');
     this.worker.terminate(); this.rejectAll(new Error('Operation cancelled. Analyze the archive again to continue.'));
     try { await this.cleanup(); } finally { this.startWorker(); }
   }
-  async dispose() { this.worker.terminate(); this.rejectAll(new Error('Migrator disposed.')); await this.cleanup(); }
+  async dispose() {
+    if (this.disposed) return;
+    // Close idle OPFS handles in their owning worker before terminating it.
+    // Firefox may still hold their locks after an abrupt worker termination.
+    const closing = !this.workerFailed && this.pending.size === 0 ? this.call<void>('dispose') : undefined;
+    this.disposed = true;
+    try { if (closing) { await closing; this.directoryName = ''; } }
+    finally { this.worker.terminate(); this.rejectAll(new Error('Migrator disposed.')); await this.cleanup(); }
+  }
 }

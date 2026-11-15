@@ -11,7 +11,19 @@ const version = {
   files: [{ primary: true, filename: 'stable.jar', url: 'https://cdn.modrinth.com/test.jar', size: jar.length, hashes: { sha1, sha512 } }],
 };
 
-test('reports failed downloads and retries without repeating provider analysis', async ({ page, context }) => {
+test('uses browser-owned User-Agent and retries failed downloads without reanalysis', async ({ page, context }) => {
+  // Chromium silently removes a manual User-Agent; Firefox sends it and triggers
+  // a CDN preflight. Inspect RequestInit before Chromium can hide the mistake.
+  let guardedWorkers = 0;
+  await context.route('**/migrator.worker.ts*', async route => {
+    guardedWorkers++;
+    const response = await route.fetch();
+    const guard = `const browserFetch = self.fetch.bind(self); self.fetch = (input, init) => {
+      if (new Headers(init?.headers).has('user-agent')) throw new Error('Manual User-Agent must not reach browser Fetch');
+      return browserFetch(input, init);
+    };\n`;
+    await route.fulfill({ response, body: guard + await response.text() });
+  });
   const providerRequests: string[] = [];
   let cdnHealthy = false;
   let cdnRequests = 0;
@@ -39,6 +51,7 @@ test('reports failed downloads and retries without repeating provider analysis',
   await page.getByRole('button', { name: /Analyze pack/ }).click();
   await expect(page.getByRole('heading', { name: 'Check the matches' })).toBeVisible({ timeout: 30000 });
   await expect(page.getByRole('button', { name: /^Ready/ })).toHaveText('Ready1');
+  expect(guardedWorkers).toBeGreaterThan(0);
   expect(providerRequests.some(url => url.includes('/version_files'))).toBe(true);
   expect(providerRequests.some(url => url.includes('/project/testmod/version'))).toBe(true);
   const requestsAfterAnalysis = [...providerRequests];
