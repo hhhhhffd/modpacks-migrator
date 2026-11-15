@@ -12,9 +12,12 @@
   <p>
     <a href="https://github.com/hhhhhffd/modpacks-migrator/actions/workflows/checks.yml"><img src="https://img.shields.io/github/actions/workflow/status/hhhhhffd/modpacks-migrator/checks.yml?style=flat-square&label=Checks" alt="Checks workflow status"></a>
     <a href="https://github.com/hhhhhffd/modpacks-migrator/actions/workflows/build-artifacts.yml"><img src="https://img.shields.io/github/actions/workflow/status/hhhhhffd/modpacks-migrator/build-artifacts.yml?style=flat-square&label=Artifacts" alt="Build artifacts workflow status"></a>
+    <a href="https://github.com/hhhhhffd/modpacks-migrator/actions/workflows/pages.yml"><img src="https://img.shields.io/github/actions/workflow/status/hhhhhffd/modpacks-migrator/pages.yml?style=flat-square&label=Pages" alt="Pages deployment status"></a>
+    <a href="https://github.com/hhhhhffd/modpacks-migrator/releases/latest"><img src="https://img.shields.io/github/v/release/hhhhhffd/modpacks-migrator?style=flat-square" alt="Latest release"></a>
+    <a href="https://github.com/hhhhhffd/modpacks-migrator/releases"><img src="https://img.shields.io/github/downloads/hhhhhffd/modpacks-migrator/total?style=flat-square" alt="Release downloads"></a>
     <a href="LICENSE"><img src="https://img.shields.io/github/license/hhhhhffd/modpacks-migrator?style=flat-square" alt="License"></a>
   </p>
-  <p><a href="https://github.com/hhhhhffd/modpacks-migrator/releases">Download</a> · <a href="#website">Website</a> · <a href="#architecture">Architecture</a> · <a href="#build">Build</a></p>
+  <p><a href="https://github.com/hhhhhffd/modpacks-migrator/releases">Download</a> · <a href="https://hhhhhffd.github.io/modpacks-migrator/">Website</a> · <a href="#architecture">Architecture</a> · <a href="#build">Build</a></p>
 </div>
 
 ## Executive Summary
@@ -113,6 +116,16 @@ npm --prefix web run build
 ```
 
 Serve `web/dist/` at the root of a static HTTP(S) origin. It includes the application and generated WASM bindings; no backend is required. The development server uses port 3000 with strict port checking.
+
+For hosting below a path prefix, set `BASE_PATH` at build time:
+
+```sh
+BASE_PATH=/modpacks-migrator/ npm --prefix web run build
+```
+
+The app, fonts, favicon, worker and WASM URLs honor this prefix. The standalone SDK keeps its worker URL relative to the SDK bundle while using the configured public prefix for `pkg/`.
+
+The [GitHub Pages workflow](.github/workflows/pages.yml) deploys the website to [hhhhhffd.github.io/modpacks-migrator](https://hhhhhffd.github.io/modpacks-migrator/) on pushes to `main` or manual dispatch. It downloads the signed public WASM release matching the workspace version, verifies the launcher's pinned signature, plugin ID/API/version and SHA-256 hashes, then builds and deploys the static site. It needs no private signing key or CurseForge secret in Actions. Publish the matching WASM release before deploying a new workspace version; unavailable or invalid release assets fail deployment instead of silently changing engines.
 
 For a build without CurseForge, use `npm --prefix web run build:wasm:no-default` instead of `build:wasm`; Modrinth remains available. Do not run it over a generated CF-enabled package unless you intend to disable that provider.
 
@@ -266,7 +279,7 @@ The manifest identifies `modpacks-migrator`, uses the workspace version, plugin 
 The preparer uses `K0T1K_PLUGIN_KEY` or `~/.config/k0t1k/plugin-signing-key.pem`, requiring an Ed25519 key matching the launcher's existing pinned public key. It never creates or prints a private key or publishes anything. Existing output directories are rejected; without `--out`, a fresh directory under `.tmp/` is used. `--pkg` selects another prebuilt bindings directory. Preparation does not rebuild WASM or prove which source commit produced it: rebuild before signing to avoid stale `pkg` contents.
 
 > [!WARNING]
-> Default local builds include an extractable CurseForge key, including in the signed plugin. The intended public v1.0.0 plugin distribution includes that key; publish only with deliberate authorization and provider-policy review. Its four assets are the files above, not Linux or website archives.
+> Default local builds include an extractable CurseForge key, including in the signed plugin. The public v1.0.0 plugin release includes that key; publish only with deliberate authorization and provider-policy review. Its four assets are the files above, not Linux or website archives.
 
 Signing does not integrate the plugin. The current launcher registers only its existing plugins; it must register `modpacks-migrator` with `hhhhhffd/modpacks-migrator` and provide a baseline and worker/IO adapter for this project's `BrowserMigrator` exports. The minimum version records the manifest protocol, not automatic plugin support; the exports are not interchangeable with RatScan/packconv.
 
@@ -310,7 +323,8 @@ Evidence and downloaded results go into ignored `.tmp/`. Real user archives are 
 ## Deliverables and Links
 
 - [GitHub repository](https://github.com/hhhhhffd/modpacks-migrator) and [releases](https://github.com/hhhhhffd/modpacks-migrator/releases).
-- Website: run or deploy the [local static build](#website); there is no public deployed site linked here.
+- [Website on GitHub Pages](https://hhhhhffd.github.io/modpacks-migrator/) and [local website setup](#website).
+- [Signed WASM release v1.0.0](https://github.com/hhhhhffd/modpacks-migrator/releases/tag/v1.0.0): manifest, signature, JavaScript bindings and WASM.
 
 ## License
 

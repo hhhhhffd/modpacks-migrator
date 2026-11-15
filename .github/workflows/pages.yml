@@ -1,0 +1,77 @@
+name: Deploy GitHub Pages
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/configure-pages@v5
+        id: pages
+      - run: npm --prefix web ci
+      # Reuse the already-public signed WASM; no private key or CF secret is put in CI.
+      - name: Download the matching signed WASM release
+        shell: bash
+        run: |
+          version="$(node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const text = readFileSync("Cargo.toml", "utf8");
+            const version = text.match(/\[workspace\.package\][\s\S]*?\nversion\s*=\s*"([^"]+)"/)?.[1];
+            if (!/^\d+\.\d+\.\d+$/.test(version || "")) throw new Error("Invalid workspace version");
+            console.log(version);
+          ')"
+          printf 'RELEASE_VERSION=%s\n' "$version" >> "$GITHUB_ENV"
+          mkdir -p web/public/pkg
+          for file in plugin.json plugin.json.sig modpacks_migrator_wasm.js modpacks_migrator_wasm_bg.wasm; do
+            curl --fail --silent --show-error --location --retry 3 \
+              "https://github.com/${GITHUB_REPOSITORY}/releases/download/v${version}/${file}" \
+              --output "web/public/pkg/${file}"
+          done
+      - name: Verify the pinned signature, identity, version and file hashes
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync } from 'node:fs';
+          import assert from 'node:assert/strict';
+          import { verifyRelease } from './scripts/release-plugin.mjs';
+          verifyRelease('web/public/pkg');
+          const manifest = JSON.parse(readFileSync('web/public/pkg/plugin.json', 'utf8'));
+          assert.equal(manifest.id, 'modpacks-migrator');
+          assert.equal(manifest.version, process.env.RELEASE_VERSION);
+          assert.equal(manifest.api, 1);
+          assert.deepEqual(Object.keys(manifest.files).sort(), ['modpacks_migrator_wasm.js', 'modpacks_migrator_wasm_bg.wasm']);
+          console.log('Signed release and payload hashes verified.');
+          JS
+      - name: Build the project-path website
+        run: npm --prefix web run build
+        env:
+          BASE_PATH: ${{ steps.pages.outputs.base_path }}/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/dist
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment
