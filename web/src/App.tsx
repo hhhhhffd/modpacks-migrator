@@ -160,7 +160,15 @@ export default function App() {
   const target = { minecraftVersion: version.trim(), loader };
   const locked = !!busy || updating;
   const removed = (id: string) => selections.some(item => item.inputId === id && item.exclude);
-  const entries = resolution?.entries || [];
+  const entries = result?.report.entries || resolution?.entries || [];
+  const downloadFailures = new Map<string, number>();
+  for (const entry of result?.report.entries || []) {
+    if (entry.selected && !entry.outputPath && entry.action !== 'excluded') {
+      const reason = concise(entry.reason || 'The file could not be verified.');
+      downloadFailures.set(reason, (downloadFailures.get(reason) || 0) + 1);
+    }
+  }
+  const canRetryDownloads = !!result && (resolution?.entries.some(isReady) ?? false);
   const selectedCount = entries.filter(entry => isReady(entry) && !removed(entry.inputId)).length;
   const removedCount = entries.filter(entry => removed(entry.inputId)).length;
   const attentionCount = entries.filter(entry => !isReady(entry) && !removed(entry.inputId)).length;
@@ -229,6 +237,13 @@ export default function App() {
     setEditingSetup(false); setFilter('all'); setModQuery('');
     requestAnimationFrame(() => previewRef.current?.scrollIntoView({ block: 'start', behavior: 'instant' }));
   }
+  async function buildPack() {
+    setResult(undefined);
+    const converted = await engine.current!.convertZip();
+    setResult(converted);
+    if (converted.report.status === 'empty') { setFilter('attention'); setModQuery(''); }
+    requestAnimationFrame(() => resultRef.current?.scrollIntoView({ block: 'center', behavior: 'instant' }));
+  }
   function openReplacement(inputId: string) { setReplace(inputId); setProjects([]); setAlternatives([]); setQuery(''); setSearched(false); setVersionsLoaded(false); setError(''); }
   const warning = resolution?.warnings?.length ? resolution.warnings.map(message => message.includes('CurseForge') ? 'CurseForge is unavailable for this analysis. Modrinth matches are still available. Analyze again to retry.' : concise(message)) : [];
   const steps = [['Your modpack', !resolution ? 'current' : 'done'], ['Review matches', resolution && !result ? 'current' : result ? 'done' : ''], ['Download', result ? 'current' : '']] as const;
@@ -289,9 +304,9 @@ export default function App() {
             <div className="entry-actions">{isRemoved ? <button disabled={!!busy} className="undo-button" onClick={() => undoRemoval(entry.inputId)}><Icon name="undo" size={15} /> Undo</button> : <><button disabled={locked} className="replace-button" onClick={() => openReplacement(entry.inputId)}>Replace</button><button disabled={!!busy} className="remove-button" onClick={() => removeEntry(entry.inputId)} aria-label={`Remove ${name}`} title="Leave this mod out of the download"><Icon name="minus" size={15} /><span>Remove</span></button></>}</div>
           </article>;
         })}{filteredEntries.length === 0 && <div className="empty-list"><span className="empty-icon"><Icon name={filter === 'attention' ? 'check' : 'search'} size={22} /></span><h3>{filter === 'attention' ? 'Nothing needs your attention.' : filter === 'removed' && !modQuery ? 'Nothing left behind.' : 'No mods here.'}</h3><p>{modQuery ? 'Try another name or clear your search.' : filter === 'removed' ? 'Mods you remove stay here, with an option to undo.' : 'Choose another filter to see your mods.'}</p>{(modQuery || filter !== 'all') && <button className="secondary" onClick={() => { setModQuery(''); setFilter('all'); }}>Show all mods</button>}</div>}</div>
-        <div className="preview-footer"><div><strong>{selectedCount} {selectedCount === 1 ? 'mod' : 'mods'} ready to pack</strong><p>Removing a required dependency also leaves out the mods that need it.</p></div><button className="primary" disabled={locked || !selectedCount} onClick={() => void run('Building your modpack', async () => { setResult(await engine.current!.convertZip()); requestAnimationFrame(() => resultRef.current?.scrollIntoView({ block: 'center', behavior: 'instant' })); })}>Build modpack <Icon name="arrow" size={18} /></button></div>
+        <div className="preview-footer"><div><strong>{selectedCount} {selectedCount === 1 ? 'mod' : 'mods'} ready to pack</strong><p>Removing a required dependency also leaves out the mods that need it.</p></div><button className="primary" disabled={locked || (!selectedCount && !canRetryDownloads)} onClick={() => void run('Building your modpack', buildPack)}>{canRetryDownloads && downloadFailures.size ? 'Retry downloads' : 'Build modpack'} <Icon name="arrow" size={18} /></button></div>
       </section>}
-      {result && <section className={`result ${result.report.status === 'empty' ? 'empty-result' : ''}`} ref={resultRef} aria-labelledby="result-title"><div className="result-icon"><Icon name={result.report.status === 'empty' ? 'box' : 'check'} size={28} /></div><div className="result-copy"><h2 id="result-title">{result.report.status === 'completed' ? 'Your pack is ready' : result.report.status === 'partial' ? 'Your pack is partially ready' : result.report.status === 'empty' ? 'No files could be included' : `Migration ${result.report.status}`}</h2><p>{result.report.status === 'partial' ? 'Some mods couldn’t make the trip. The report lists which ones and why.' : result.report.status === 'empty' ? 'No verified files were available. Try a replacement or another target version.' : 'Verified files in a clean ZIP, plus a report of everything that changed.'}</p><div className="buttons">{result.report.status !== 'empty' && <button className="primary" onClick={() => save(result.archive, 'migrated-modpack.zip')}><Icon name="download" size={17} /> Download ZIP</button>}<button className="secondary" onClick={() => save(new Blob([JSON.stringify(result.report, null, 2)], { type: 'application/json' }), 'migration-report.json')}>Download report <Icon name="download" size={15} /></button></div></div></section>}
+      {result && <section className={`result ${result.report.status === 'empty' ? 'empty-result' : ''}`} ref={resultRef} aria-labelledby="result-title"><div className="result-icon"><Icon name={result.report.status === 'empty' ? 'box' : 'check'} size={28} /></div><div className="result-copy"><h2 id="result-title">{result.report.status === 'completed' ? 'Your pack is ready' : result.report.status === 'partial' ? 'Your pack is partially ready' : result.report.status === 'empty' ? 'Your modpack could not be built' : `Migration ${result.report.status}`}</h2><p>{result.report.status === 'partial' ? 'Some mods couldn’t make the trip. The report lists which ones and why.' : result.report.status === 'empty' ? `No files passed download and verification for Minecraft ${result.report.target.minecraftVersion} / ${result.report.target.loader}. No modpack was created. See the failures below and retry the downloads.` : 'Verified files in a clean ZIP, plus a report of everything that changed.'}</p>{downloadFailures.size > 0 && <div className="result-failures"><h3>What went wrong</h3><ul>{[...downloadFailures].slice(0, 5).map(([reason, count]) => <li key={reason}><strong>{count} {count === 1 ? 'mod' : 'mods'}</strong><span>{reason}</span></li>)}</ul>{downloadFailures.size > 5 && <p>More failures are shown beside the affected mods in the list.</p>}</div>}<div className="buttons">{canRetryDownloads && downloadFailures.size > 0 && <button className="primary" disabled={locked} onClick={() => void run('Building your modpack', buildPack)}>Retry downloads <Icon name="arrow" size={17} /></button>}{result.report.status !== 'empty' && <button className="primary" onClick={() => save(result.archive, 'migrated-modpack.zip')}><Icon name="download" size={17} /> Download ZIP</button>}<button className="secondary" onClick={() => save(new Blob([JSON.stringify(result.report, null, 2)], { type: 'application/json' }), 'migration-report.json')}>Download report <Icon name="download" size={15} /></button></div></div></section>}
       <div className="ground-rules"><div><span><Icon name="shield" size={20} /></span><strong>Your pack stays yours</strong><small>Everything is processed in this tab, not on a server.</small></div><div><span><Icon name="box" size={20} /></span><strong>Official files only</strong><small>Matched through Modrinth and CurseForge.</small></div><div><span><Icon name="check" size={20} /></span><strong>No surprises in your ZIP</strong><small>Only verified files. Configs stay untouched.</small></div></div>
     </main>
     <footer className="footer page-width">
