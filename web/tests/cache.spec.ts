@@ -60,12 +60,15 @@ test('reuses successful metadata across selections and invalidates it for a new 
   expect(result.newArchiveCount).toBe(4);
 });
 
-test('snapshots metadata failures until the next analysis', async ({ page, context }) => {
+for (const failure of ['HTTP 503', 'oversized response'] as const) test(`snapshots ${failure} until the next analysis`, async ({ page, context }) => {
   let identificationRequests = 0;
   await context.route('https://api.modrinth.com/**', async route => {
     if (route.request().url().includes('/version_files')) {
       identificationRequests++;
-      if (identificationRequests === 1) return route.fulfill({ status: 503, headers: { 'access-control-allow-origin': '*' } });
+      if (identificationRequests === 1) {
+        if (failure === 'HTTP 503') return route.fulfill({ status: 503, headers: { 'access-control-allow-origin': '*' } });
+        return route.fulfill({ body: Buffer.alloc(8 * 1024 * 1024 + 1), headers: { 'access-control-allow-origin': '*' } });
+      }
       return route.fulfill({ json: { [sha512]: version('old') }, headers: { 'access-control-allow-origin': '*' } });
     }
     await route.fulfill({ json: [version('new')], headers: { 'access-control-allow-origin': '*' } });

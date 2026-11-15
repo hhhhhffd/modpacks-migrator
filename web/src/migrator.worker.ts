@@ -28,9 +28,9 @@ function cacheMetadata(key: string, entry: CachedResponse) {
   while (cacheSize + entry.size > cacheLimit) { const oldest = metadataCache.keys().next().value!; cacheSize -= metadataCache.get(oldest)!.size; metadataCache.delete(oldest); }
   metadataCache.set(key, entry); cacheSize += entry.size;
 }
-async function cacheKey(method: string, url: string, headers: Headers, body: Uint8Array) {
+async function cacheKey(method: string, url: string, headers: Headers, body: Uint8Array, maxBytes: number) {
   // Hash headers too, so credentials never appear in cache keys and variants cannot collide.
-  const prefix = new TextEncoder().encode(JSON.stringify([method, url, Array.from(headers.entries())]));
+  const prefix = new TextEncoder().encode(JSON.stringify([method, url, Array.from(headers.entries()), maxBytes]));
   const bytes = new Uint8Array(prefix.length + body.length); bytes.set(prefix); bytes.set(body, prefix.length);
   return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), b => b.toString(16).padStart(2, '0')).join('');
 }
@@ -62,7 +62,7 @@ const adapter = {
     if (hasKey && !['https://api.curseforge.com', 'https://edge.forgecdn.net'].includes(parsed.origin)) throw new Error('Credentials cannot be sent to this origin.');
     const generation = cacheGeneration;
     const cacheable = !!input && !converting && (method === 'GET' || method === 'POST') && ['https://api.modrinth.com', 'https://api.curseforge.com'].includes(parsed.origin);
-    const key = cacheable ? await cacheKey(method, url, headers, body) : undefined;
+    const key = cacheable ? await cacheKey(method, url, headers, body, maxBytes) : undefined;
     const cached = key && generation === cacheGeneration ? metadataCache.get(key) : undefined;
     if (cached) {
       if ('error' in cached) throw Object.assign(new Error(cached.error), { name: cached.name });
@@ -70,9 +70,24 @@ const adapter = {
       return { status: cached.status, headers: cached.headers.map(([name, value]) => [name, value] as [string, string]), body: cached.body.slice() };
     }
     const timeout = AbortSignal.timeout(45_000);
-    let response: Response;
     try {
-      response = await fetch(url, { method, headers, body: body.length ? new Uint8Array(body) : undefined, redirect: 'error', signal: AbortSignal.any([controller.signal, timeout]), credentials: 'omit', referrerPolicy: 'no-referrer' });
+      const response = await fetch(url, { method, headers, body: body.length ? new Uint8Array(body) : undefined, redirect: 'error', signal: AbortSignal.any([controller.signal, timeout]), credentials: 'omit', referrerPolicy: 'no-referrer' });
+      const length = Number(response.headers.get('content-length'));
+      const stream = response.body?.getReader(); const chunks: Uint8Array[] = []; let total = 0;
+      if (stream) {
+        try {
+          if (Number.isFinite(length) && length > maxBytes) throw new Error('Provider response exceeds the size limit.');
+          while (true) { const { done, value } = await stream.read(); if (done) break; total += value.length; if (total > maxBytes) throw new Error('Provider response exceeds the size limit.'); chunks.push(value); }
+        } catch (error) {
+          try { await stream.cancel(); } catch (cancelError) { throw new AggregateError([error, cancelError], `Provider response failed: ${String(error)}; stream cancellation failed: ${String(cancelError)}`); }
+          throw error;
+        } finally { stream.releaseLock(); }
+      } else if (Number.isFinite(length) && length > maxBytes) throw new Error('Provider response exceeds the size limit.');
+      const bytes = new Uint8Array(total); let offset = 0; for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
+      const responseHeaders = Array.from(response.headers.entries());
+      const size = bytes.length + responseHeaders.reduce((sum, [name, value]) => sum + 2 * (name.length + value.length), 0) + 512;
+      if (key && generation === cacheGeneration) cacheMetadata(key, { status: response.status, headers: responseHeaders, body: bytes.slice(), size });
+      return { status: response.status, headers: responseHeaders, body: bytes };
     } catch (error) {
       if (key && generation === cacheGeneration && !controller.signal.aborted) {
         const message = error instanceof Error ? error.message : String(error);
@@ -81,15 +96,6 @@ const adapter = {
       }
       throw error;
     }
-    const length = Number(response.headers.get('content-length'));
-    if (Number.isFinite(length) && length > maxBytes) throw new Error('Provider response exceeds the size limit.');
-    const stream = response.body?.getReader(); const chunks: Uint8Array[] = []; let total = 0;
-    if (stream) { try { while (true) { const { done, value } = await stream.read(); if (done) break; total += value.length; if (total > maxBytes) { await stream.cancel(); throw new Error('Provider response exceeds the size limit.'); } chunks.push(value); } } finally { stream.releaseLock(); } }
-    const bytes = new Uint8Array(total); let offset = 0; for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
-    const responseHeaders = Array.from(response.headers.entries());
-    const size = bytes.length + responseHeaders.reduce((sum, [name, value]) => sum + 2 * (name.length + value.length), 0) + 512;
-    if (key && generation === cacheGeneration) cacheMetadata(key, { status: response.status, headers: responseHeaders, body: bytes.slice(), size });
-    return { status: response.status, headers: responseHeaders, body: bytes };
   },
 };
 async function getMigrator() {
