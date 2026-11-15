@@ -102,7 +102,7 @@ test('shows repository and author links even before the repository exists', asyn
   await expect(page.locator('.author-link')).toContainText('hhhhhffd');
   await expect(page).toHaveTitle(/hhhhhffd/);
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByRole('link', { name: 'GitHub repository', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Source on GitHub', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Your next world. Your favorite mods.' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

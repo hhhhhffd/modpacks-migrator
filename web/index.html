@@ -1,2 +1,32 @@
 <!doctype html>
-<html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="theme-color" content="#2337ff" /><meta name="description" content="Take your Minecraft modpack somewhere new. Find compatible mods, review your choices, and download a verified ZIP. Local-first, by hhhhhffd." /><link rel="icon" type="image/svg+xml" href="/favicon.svg" /><title>Modpack Migrator · hhhhhffd</title></head><body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#eceef5" />
+    <meta name="description" content="Take your Minecraft modpack somewhere new. Find compatible mods, review your choices, and download a verified ZIP. Local-first, by hhhhhffd." />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Modpack Migrator · hhhhhffd</title>
+    <script>
+      // Apply the saved preference before the first paint, not after React loads.
+      let preference = 'system';
+      try {
+        const saved = localStorage.getItem('modpacks-migrator-theme');
+        if (saved === 'light' || saved === 'dark') preference = saved;
+      } catch (error) {
+        console.warn('Theme preference could not be read; using the device theme.', error);
+      }
+      const theme = preference === 'system'
+        ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+        : preference;
+      document.documentElement.dataset.themePreference = preference;
+      document.documentElement.dataset.theme = theme;
+      document.querySelector('meta[name="theme-color"]').content = theme === 'dark' ? '#10121c' : '#eceef5';
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

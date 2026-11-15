@@ -48,7 +48,30 @@ function isReady(entry: Entry) { return !!entry.selected && (entry.status === 'u
 function Channel({ candidate }: { candidate: Candidate }) { return <span className={`badge ${candidate.channel}`}>{candidate.channel}</span>; }
 
 type Filter = 'all' | 'ready' | 'attention' | 'removed';
+type ThemePreference = 'system' | 'light' | 'dark';
 export default function App() {
+  const [themePreference, setThemePreference] = useState<ThemePreference>(() => {
+    const preference = document.documentElement.dataset.themePreference;
+    return preference === 'light' || preference === 'dark' ? preference : 'system';
+  });
+  useEffect(() => {
+    const deviceTheme = window.matchMedia('(prefers-color-scheme: dark)');
+    function applyTheme() {
+      const theme = themePreference === 'system' ? (deviceTheme.matches ? 'dark' : 'light') : themePreference;
+      document.documentElement.dataset.themePreference = themePreference;
+      document.documentElement.dataset.theme = theme;
+      document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')!.content = theme === 'dark' ? '#10121c' : '#eceef5';
+    }
+    applyTheme();
+    if (themePreference !== 'system') return;
+    deviceTheme.addEventListener('change', applyTheme);
+    return () => deviceTheme.removeEventListener('change', applyTheme);
+  }, [themePreference]);
+  function changeTheme(preference: ThemePreference) {
+    setThemePreference(preference);
+    try { localStorage.setItem('modpacks-migrator-theme', preference); }
+    catch (error) { console.warn('Theme preference could not be saved; it will apply to this tab only.', error); }
+  }
   const engine = useRef<Migrator | null>(null);
   const [file, setFile] = useState<File>();
   const [version, setVersion] = useState('');
@@ -187,7 +210,10 @@ export default function App() {
   return <div className="app-shell">
     <header className="topbar page-width">
       <a className="brand" href="/" aria-label="Modpack Migrator home"><span className="brand-mark"><Icon name="box" size={18} /></span><span>modpack<span className="brand-second">migrator</span></span></a>
-      <nav aria-label="Project links"><a className="repo-link" aria-label="GitHub repository" href={repository} target="_blank" rel="noreferrer"><Icon name="github" size={17} /><span>GitHub</span></a><a className="author-link" href={author} target="_blank" rel="noreferrer" aria-label="Made by hhhhhffd on GitHub"><span className="author-avatar" aria-hidden="true">h</span><span>hhhhhffd</span></a></nav>
+      <div className="header-actions">
+        <label className="theme-picker"><span className="visually-hidden">Theme</span><select aria-label="Theme" value={themePreference} onChange={event => changeTheme(event.target.value as ThemePreference)}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+        <nav aria-label="Project links"><a className="repo-link" href={repository} target="_blank" rel="noreferrer">Source on GitHub</a></nav>
+      </div>
     </header>
     <section className={`hero page-width ${resolution && !editingSetup ? 'is-compact' : ''}`} aria-labelledby="hero-title">
       <div className="hero-copy">
@@ -197,7 +223,7 @@ export default function App() {
         <ul className="hero-facts"><li><Icon name="shield" size={16} /> Your files never leave this device</li><li><Icon name="check" size={16} /> Only hash-verified downloads</li></ul>
       </div>
       <section className={`setup ${resolution && !editingSetup ? 'setup-collapsed' : ''}`} aria-labelledby="setup-title">
-        <ol className="journey" aria-label="Migration steps">{steps.map(([label, state], index) => <li key={label} className={state} aria-current={state === 'current' ? 'step' : undefined}><span>{state === 'done' ? <Icon name="check" size={12} /> : index + 1}</span>{label}</li>)}</ol>
+        <ol className="journey" aria-label="Migration steps">{steps.map(([label, state], index) => <li key={label} className={state} aria-current={state === 'current' ? 'step' : undefined}><span className="step-number">{state === 'done' ? <Icon name="check" size={12} /> : index + 1}</span><span className="step-label">{label}</span></li>)}</ol>
         {resolution && !editingSetup && <div className="pack-summary"><span className="file-symbol"><Icon name="box" size={22} /></span><div><strong>{file?.name}</strong><span>{version.trim()} · {loader} · {entries.length} mods found</span></div><button className="secondary" disabled={locked} onClick={() => setEditingSetup(true)}>Edit setup</button></div>}
         <div className="setup-content" hidden={!!resolution && !editingSetup}>
           <h2 id="setup-title" className="visually-hidden">Start with your modpack</h2>
@@ -235,9 +261,11 @@ export default function App() {
       </section>}
       {result && <section className={`result ${result.report.status === 'empty' ? 'empty-result' : ''}`} ref={resultRef} aria-labelledby="result-title"><div className="result-icon"><Icon name={result.report.status === 'empty' ? 'box' : 'check'} size={28} /></div><div className="result-copy"><h2 id="result-title">{result.report.status === 'completed' ? 'Your pack is ready' : result.report.status === 'partial' ? 'Your pack is partially ready' : result.report.status === 'empty' ? 'No files could be included' : `Migration ${result.report.status}`}</h2><p>{result.report.status === 'partial' ? 'Some mods couldn’t make the trip. The report lists which ones and why.' : result.report.status === 'empty' ? 'No verified files were available. Try a replacement or another target version.' : 'Verified files in a clean ZIP, plus a report of everything that changed.'}</p><div className="buttons">{result.report.status !== 'empty' && <button className="primary" onClick={() => save(result.archive, 'migrated-modpack.zip')}><Icon name="download" size={17} /> Download ZIP</button>}<button className="secondary" onClick={() => save(new Blob([JSON.stringify(result.report, null, 2)], { type: 'application/json' }), 'migration-report.json')}>Download report <Icon name="download" size={15} /></button></div></div></section>}
       <div className="ground-rules"><div><span><Icon name="shield" size={20} /></span><strong>Your pack stays yours</strong><small>Everything is processed in this tab, not on a server.</small></div><div><span><Icon name="box" size={20} /></span><strong>Official files only</strong><small>Matched through Modrinth and CurseForge.</small></div><div><span><Icon name="check" size={20} /></span><strong>No surprises in your ZIP</strong><small>Only verified files. Configs stay untouched.</small></div></div>
-      <p className="compatibility-note">We find published builds, not magic fixes. Minecraft runtime compatibility isn’t guaranteed.</p>
     </main>
-    <footer className="footer page-width"><a className="footer-brand" href={repository} target="_blank" rel="noreferrer"><Icon name="box" size={16} /> modpack migrator</a><span>Built by <a href={author} target="_blank" rel="noreferrer">hhhhhffd</a></span><span>Open source · AGPL-3.0 · <a href={repository} target="_blank" rel="noreferrer">Source <Icon name="arrow" size={13} /></a></span></footer>
+    <footer className="footer page-width">
+      <p className="compatibility-note">We find published builds, not magic fixes. Minecraft runtime compatibility isn’t guaranteed.</p>
+      <p className="copyright">© {new Date().getFullYear()} <a className="author-link" href={author} target="_blank" rel="noreferrer">hhhhhffd</a>. Licensed under <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noreferrer">AGPL-3.0</a>.</p>
+    </footer>
     {replace && <div className="modal-backdrop" onClick={() => setReplace(undefined)}><div className="modal" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="replace-title" onClick={event => event.stopPropagation()}><div className="section-heading"><div><p className="eyebrow">FIND A NEW FAVORITE</p><h2 id="replace-title">A different mod. Your choice.</h2></div><button className="icon-button" aria-label="Close replacement" onClick={() => setReplace(undefined)}><Icon name="close" size={20} /></button></div><p className="modal-description">Search an official project or paste its link. Only builds for {version.trim()} / {loader} will appear.</p><form className="search" onSubmit={event => { event.preventDefault(); if (query.trim() && !busy) void run('Searching projects', async () => { setAlternatives([]); setVersionsLoaded(false); setProjects(await engine.current!.searchProjects(provider, query.trim())); setSearched(true); }); }}><select disabled={!!busy} aria-label="Provider" value={provider} onChange={event => { setProvider(event.target.value as Provider); setProjects([]); setAlternatives([]); setSearched(false); setVersionsLoaded(false); }}><option value="modrinth">Modrinth</option><option value="curseforge">CurseForge</option></select><input ref={searchInput} disabled={!!busy} aria-label="Project name or ID" placeholder="Search a mod or paste a project link" value={query} onChange={event => setQuery(event.target.value)} /><button type="submit" aria-label="Search" className="primary" disabled={!query.trim() || !!busy}><Icon name="search" size={17} /><span>Search</span></button></form><button className="direct-id quiet-button" disabled={!query.trim() || !!busy} onClick={() => void run('Loading compatible versions', async () => { const id = projectIdFromInput(provider, query); setProjects([]); setSearched(false); setAlternatives(await engine.current!.listCandidates(provider, id, target)); setVersionsLoaded(true); })}>Use this project ID / official link <Icon name="arrow" size={14} /></button>{busy && <div className="modal-loading" role="status"><span className="spinner" />{busy}…</div>}{error && <p className="modal-error" role="alert">{error}</p>}<div className="search-results">{projects.map(project => <button disabled={!!busy} key={project.projectId} className="project" onClick={() => void run('Loading compatible versions', async () => { setAlternatives(await engine.current!.listCandidates(provider, project.projectId, target)); setVersionsLoaded(true); })}><span className="file-symbol"><Icon name="box" size={20} /></span><span><strong>{project.name}</strong><small>{project.description || project.projectId}</small></span><Icon name="arrow" size={17} /></button>)}{alternatives.map(candidate => <button disabled={!!busy} key={`${candidate.provider}-${candidate.versionId}`} className="project candidate-project" onClick={() => { changeSelection(replace, { provider: candidate.provider, projectId: candidate.projectId, versionId: candidate.versionId }); setReplace(undefined); }}><span><strong>{candidate.name}</strong><small>{candidate.version}</small></span><Channel candidate={candidate} /><span className="choose-version">Choose <Icon name="arrow" size={15} /></span></button>)}{!busy && ((searched && !projects.length) || (versionsLoaded && !alternatives.length)) && <p className="modal-empty">{versionsLoaded ? 'No compatible builds for this target. Try another project.' : 'No projects found. Try another name or use an official link.'}</p>}</div><p className="replacement-note"><Icon name="shield" size={15} /> This is a manual replacement, not an automatic match. It will appear in your report.</p></div></div>}
   </div>;
 }
