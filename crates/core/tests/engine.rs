@@ -314,3 +314,153 @@ fn conflicting_exact_dependency_blocks_both_projects() {
     assert_eq!(result.entries[0].status, EntryStatus::DependencyConflict);
     assert_eq!(result.entries[1].status, EntryStatus::DependencyConflict);
 }
+
+#[test]
+fn conflicting_versions_of_same_project_are_blocked() {
+    let engine = Engine::new(Mock, None, Limits::default());
+    let a = Input {
+        id: "1".into(),
+        path: "a.jar".into(),
+        size: 1,
+        sha1: "x".into(),
+        sha512: "hash".into(),
+        fingerprint: 1,
+    };
+    let mut b = a.clone();
+    b.id = "2".into();
+    b.path = "b.jar".into();
+    let mut request = req();
+    request.selections.push(Selection {
+        input_id: "2".into(),
+        exclude: false,
+        provider: None,
+        project_id: None,
+        version_id: Some("stable".into()),
+    });
+    let resolution = run(engine.resolve(
+        &Analysis {
+            inputs: vec![a, b],
+            ignored_files: 0,
+        },
+        &request,
+        &mut |_| Ok(()),
+    ))
+    .unwrap();
+    assert!(resolution
+        .entries
+        .iter()
+        .all(|e| e.status == EntryStatus::DependencyConflict));
+}
+#[test]
+fn dependency_selections_are_enforced() {
+    let engine = Engine::new(DependencyMock, None, Limits::default());
+    let input = Input {
+        id: "1".into(),
+        path: "a.jar".into(),
+        size: 1,
+        sha1: "x".into(),
+        sha512: "hash".into(),
+        fingerprint: 1,
+    };
+    for (exclude, version) in [(true, None), (false, Some("b2".to_string()))] {
+        let mut request = req();
+        request.selections.push(Selection {
+            input_id: "dependency-Modrinth-b".into(),
+            exclude,
+            provider: None,
+            project_id: None,
+            version_id: version,
+        });
+        let result = run(engine.resolve(
+            &Analysis {
+                inputs: vec![input.clone()],
+                ignored_files: 0,
+            },
+            &request,
+            &mut |_| Ok(()),
+        ))
+        .unwrap();
+        assert_eq!(result.entries[0].status, EntryStatus::DependencyConflict);
+        assert!(!result.entries.iter().any(|e| e
+            .selected
+            .as_ref()
+            .is_some_and(|c| c.project_id == "b" && e.status == EntryStatus::Updated)));
+    }
+}
+#[test]
+fn verified_identical_cross_provider_artifacts_share_zip_path() {
+    let engine = Engine::new(Mock, None, Limits::default());
+    let c:Candidate=serde_json::from_value(json!({"provider":"modrinth","projectId":"p","versionId":"alpha","fileId":"alpha.jar","name":"alpha","version":"alpha","filename":"alpha.jar","url":"https://cdn.modrinth.com/alpha.jar","sha1":format!("{:x}",Sha1::digest(b"alpha")),"sha512":null,"size":5,"published":"2025","channel":"alpha","gameVersions":["1.20.1"],"loaders":["fabric"],"dependencies":[],"projectUrl":"https://modrinth.com/mod/p"})).unwrap();
+    let entry = Entry {
+        input_id: "1".into(),
+        source_path: "a.jar".into(),
+        source: None,
+        candidates: vec![],
+        selected: Some(c),
+        status: EntryStatus::Updated,
+        reason: None,
+        action: None,
+        required_by: vec![],
+        output_path: None,
+    };
+    let mut other = entry.clone();
+    other.input_id = "2".into();
+    let c = other.selected.as_mut().unwrap();
+    c.provider = Provider::Curseforge;
+    c.project_id = "42".into();
+    let resolution = Resolution {
+        schema_version: 1,
+        target: target(),
+        entries: vec![entry, other],
+        warnings: vec![],
+        include_dependencies: true,
+    };
+    let mut out = Cursor::new(Vec::new());
+    let report = run(engine.convert(
+        &resolution,
+        &mut Store::default(),
+        &mut out,
+        &mut |_| Ok(()),
+    ))
+    .unwrap();
+    assert_eq!(report.entries[0].output_path, report.entries[1].output_path);
+    assert_eq!(
+        zip::ZipArchive::new(Cursor::new(out.into_inner()))
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn dependency_replacement_does_not_satisfy_original_project() {
+    let engine = Engine::new(DependencyMock, None, Limits::default());
+    let input = Input {
+        id: "1".into(),
+        path: "a.jar".into(),
+        size: 1,
+        sha1: "x".into(),
+        sha512: "hash".into(),
+        fingerprint: 1,
+    };
+    let mut request = req();
+    request.selections.push(Selection {
+        input_id: "dependency-Modrinth-b".into(),
+        exclude: false,
+        provider: Some(Provider::Modrinth),
+        project_id: Some("a".into()),
+        version_id: Some("a1".into()),
+    });
+    let result = run(engine.resolve(
+        &Analysis {
+            inputs: vec![input],
+            ignored_files: 0,
+        },
+        &request,
+        &mut |_| Ok(()),
+    ))
+    .unwrap();
+    assert_eq!(result.entries[0].status, EntryStatus::DependencyConflict);
+    assert_eq!(result.entries[1].action, Some(Action::Replacement));
+    assert_eq!(result.entries[1].selected.as_ref().unwrap().project_id, "a");
+}

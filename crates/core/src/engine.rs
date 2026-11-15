@@ -402,6 +402,7 @@ impl<T: HttpTransport> Engine<T> {
             }
             resolution.entries.push(entry);
         }
+        mark_project_conflicts(&mut resolution.entries);
         self.dependencies(&mut resolution, request, progress)
             .await?;
         progress(event(
@@ -427,6 +428,10 @@ impl<T: HttpTransport> Engine<T> {
                 resolution.entries.len(),
                 "Resolving dependencies",
             ))?;
+            if !usable(&resolution.entries[index]) {
+                index += 1;
+                continue;
+            }
             let Some(mut candidate) = resolution.entries[index].selected.clone() else {
                 index += 1;
                 continue;
@@ -499,8 +504,46 @@ impl<T: HttpTransport> Engine<T> {
                         Some(format!("Required dependency {project} is missing"));
                     continue;
                 }
+                let dependency_id = format!("dependency-{:?}-{project}", candidate.provider);
+                if resolution
+                    .entries
+                    .iter()
+                    .any(|e| e.input_id == dependency_id)
+                {
+                    resolution.entries[index].status = EntryStatus::DependencyConflict;
+                    resolution.entries[index].reason =
+                        Some(format!("Required dependency {project} is unavailable"));
+                    continue;
+                }
+                let selection = request
+                    .selections
+                    .iter()
+                    .find(|s| s.input_id == dependency_id);
+                if selection.is_some_and(|s| s.exclude) {
+                    resolution.entries[index].status = EntryStatus::DependencyConflict;
+                    resolution.entries[index].reason =
+                        Some(format!("Required dependency {project} was excluded"));
+                    resolution.entries.push(Entry {
+                        input_id: dependency_id,
+                        source_path: String::new(),
+                        source: None,
+                        candidates: vec![],
+                        selected: None,
+                        status: EntryStatus::DependencyConflict,
+                        reason: Some("Excluded by user".into()),
+                        action: Some(Action::Excluded),
+                        required_by: vec![candidate.project_id.clone()],
+                        output_path: None,
+                    });
+                    continue;
+                }
+                let (selected_provider, selected_project) = selection
+                    .and_then(|s| s.provider.zip(s.project_id.as_deref()))
+                    .unwrap_or((candidate.provider, project.as_str()));
+                let replaced =
+                    selected_provider != candidate.provider || selected_project != project;
                 let list = self
-                    .list_with_warning(candidate.provider, &project, &request.target)
+                    .list_with_warning(selected_provider, selected_project, &request.target)
                     .await;
                 let mut candidates = match list {
                     Ok((c, incomplete)) => {
@@ -523,7 +566,11 @@ impl<T: HttpTransport> Engine<T> {
                     .iter()
                     .find(|c| {
                         c.url.is_some()
-                            && dep.version_id.as_ref().is_none_or(|v| v == &c.version_id)
+                            && selection
+                                .and_then(|s| s.version_id.as_ref())
+                                .is_none_or(|v| v == &c.version_id)
+                            && (replaced
+                                || dep.version_id.as_ref().is_none_or(|v| v == &c.version_id))
                     })
                     .cloned();
                 if selected.is_none() {
@@ -533,15 +580,25 @@ impl<T: HttpTransport> Engine<T> {
                     ));
                     continue;
                 }
+                if replaced {
+                    resolution.entries[index].status = EntryStatus::DependencyConflict;
+                    resolution.entries[index].reason = Some(format!(
+                        "Replacement does not satisfy required dependency {project}"
+                    ));
+                }
                 resolution.entries.push(Entry {
-                    input_id: format!("dependency-{:?}-{project}", candidate.provider),
+                    input_id: dependency_id,
                     source_path: String::new(),
                     source: None,
                     candidates,
                     selected,
                     status: EntryStatus::Updated,
                     reason: None,
-                    action: Some(Action::AddedDependency),
+                    action: Some(if replaced {
+                        Action::Replacement
+                    } else {
+                        Action::AddedDependency
+                    }),
                     required_by: vec![candidate.project_id.clone()],
                     output_path: None,
                 });
@@ -602,19 +659,22 @@ impl<T: HttpTransport> Engine<T> {
                     }) {
                         return Err(Error::Protocol("Download hash mismatch".into()));
                     }
-                    total = total
-                        .checked_add(bytes.len() as u64)
-                        .ok_or(Error::Limit("staging bytes".into()))?;
-                    if total > self.limits.max_total_bytes {
-                        return Err(Error::Limit("staging bytes".into()));
+                    let content_key = format!("{:x}", Sha512::digest(&bytes));
+                    if !staged.values().any(|value| value == &content_key) {
+                        total = total
+                            .checked_add(bytes.len() as u64)
+                            .ok_or(Error::Limit("staging bytes".into()))?;
+                        if total > self.limits.max_total_bytes {
+                            return Err(Error::Limit("staging bytes".into()));
+                        }
+                        store.put(&content_key, &bytes)?;
                     }
-                    store.put(&key, &bytes)?;
-                    Ok::<(), Error>(())
+                    Ok::<String, Error>(content_key)
                 }
                 .await;
             match outcome {
-                Ok(()) => {
-                    staged.insert(key.clone(), key);
+                Ok(content_key) => {
+                    staged.insert(key, content_key);
                 }
                 Err(Error::Cancelled) => return Err(Error::Cancelled),
                 Err(e) => {
@@ -633,15 +693,15 @@ impl<T: HttpTransport> Engine<T> {
                 continue;
             }
             let c = entries[i].selected.as_ref().unwrap();
-            let key = artifact_key(c);
-            if let Some(path) = paths.get(&key) {
-                entries[i].output_path = Some(path.clone());
-                entries[i].action = Some(Action::Deduplicated);
-                continue;
-            }
-            if !staged.contains_key(&key) {
+            let artifact = artifact_key(c);
+            let Some(key) = staged.get(&artifact) else {
                 entries[i].status = EntryStatus::Error;
                 entries[i].reason = Some("Verified artifact unavailable".into());
+                continue;
+            };
+            if let Some(path) = paths.get(key) {
+                entries[i].output_path = Some(path.clone());
+                entries[i].action = Some(Action::Deduplicated);
                 continue;
             }
             let filename = safe_filename(&c.filename);
@@ -655,9 +715,9 @@ impl<T: HttpTransport> Engine<T> {
                 suffix += 1;
             }
             zip.start_file(&path, SimpleFileOptions::default())?;
-            std::io::copy(&mut store.open(&key)?, &mut zip)?;
+            std::io::copy(&mut store.open(key)?, &mut zip)?;
             entries[i].output_path = Some(path.clone());
-            paths.insert(key, path);
+            paths.insert(key.clone(), path);
         }
         let count = entries.iter().filter(|e| e.output_path.is_some()).count();
         let failed = entries
@@ -896,7 +956,31 @@ fn safe_filename(name: &str) -> String {
         "mod.jar".into()
     }
 }
+fn mark_project_conflicts(entries: &mut [Entry]) {
+    let snapshot = entries.to_vec();
+    for (i, a) in snapshot.iter().enumerate() {
+        let Some(a) = a.selected.as_ref().filter(|_| usable(&snapshot[i])) else {
+            continue;
+        };
+        for (j, b) in snapshot.iter().enumerate().skip(i + 1) {
+            let Some(b) = b.selected.as_ref().filter(|_| usable(&snapshot[j])) else {
+                continue;
+            };
+            if a.provider == b.provider
+                && a.project_id == b.project_id
+                && (a.version_id != b.version_id || a.file_id != b.file_id)
+            {
+                for index in [i, j] {
+                    entries[index].status = EntryStatus::DependencyConflict;
+                    entries[index].reason =
+                        Some("Multiple versions selected for the same project".into());
+                }
+            }
+        }
+    }
+}
 fn mark_conflicts_and_prune(entries: &mut [Entry]) {
+    mark_project_conflicts(entries);
     let snapshot = entries.to_vec();
     for (i, entry) in snapshot.iter().enumerate() {
         if !usable(entry) {
