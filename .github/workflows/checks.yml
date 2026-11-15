@@ -18,7 +18,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets --no-default-features -- -D warnings
       - run: cargo check -p modpacks-migrator-wasm --target wasm32-unknown-unknown --no-default-features
   browser:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -33,8 +33,12 @@ jobs:
       - run: npm --prefix web ci
       - run: npm --prefix web run build:wasm:no-default
       - run: npm --prefix web run build
-      - run: npx playwright install --with-deps chromium
-        working-directory: web
+      # Ubuntu's AppArmor profile permits the installed Chrome to use its sandbox.
+      # Downloaded headless-shell paths are not covered by that profile.
+      - name: Verify sandbox-capable system Chrome
+        run: |
+          test -x /opt/google/chrome/chrome
+          /opt/google/chrome/chrome --version
       - run: npm --prefix web run test:e2e
         env:
-          PLAYWRIGHT_CHROMIUM_EXECUTABLE: ""
+          PLAYWRIGHT_CHROMIUM_EXECUTABLE: /opt/google/chrome/chrome
