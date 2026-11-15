@@ -36,6 +36,24 @@ test('analyzes a local ZIP, reviews alpha, and downloads a report', async ({ pag
   expect((await download).suggestedFilename()).toBe('migration-report.json');
 });
 
+test('cancels an in-flight provider request', async ({ page, context }) => {
+  let signalRequest!: () => void;
+  const requested = new Promise<void>(resolve => { signalRequest = resolve; });
+  await context.route('https://api.modrinth.com/**', async route => {
+    signalRequest();
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    await route.fulfill({ json: {}, headers: { 'access-control-allow-origin': '*' } }).catch(() => {});
+  });
+  await page.goto('/');
+  await page.locator('input[type=file]').setInputFiles({ name: 'pack.zip', mimeType: 'application/zip', buffer: archive });
+  await page.getByPlaceholder('e.g. 1.21.1').fill('1.21.1');
+  await page.getByRole('button', { name: /Analyze pack/ }).click();
+  await requested;
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.getByRole('alert')).toContainText('cancelled');
+  await expect(page.getByRole('button', { name: /Analyze pack/ })).toBeEnabled();
+});
+
 test('rejects invalid ZIP without a server fallback', async ({ page }) => {
   await page.goto('/');
   await page.locator('input[type=file]').setInputFiles({ name: 'invalid.zip', mimeType: 'application/zip', buffer: Buffer.from('not a zip') });

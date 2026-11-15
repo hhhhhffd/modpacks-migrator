@@ -2,15 +2,16 @@ export type Provider = 'modrinth' | 'curseforge';
 export type Loader = 'fabric' | 'forge' | 'neoforge' | 'quilt';
 export interface Target { minecraftVersion: string; loader: Loader }
 export interface Input { id: string; path: string; size: number; sha1: string; sha512: string; fingerprint: number }
-export interface Analysis { inputs: Input[] }
-export interface Candidate { provider: Provider; projectId: string; versionId: string; fileId: string; name: string; version: string; filename: string; url: string | null; projectUrl: string; channel: 'release' | 'beta' | 'alpha'; published?: string }
-export interface Entry { inputId: string; sourcePath: string; source?: Candidate; selected?: Candidate; candidates: Candidate[]; status: string; reason?: string; action?: string; requiredBy?: string[] }
+export interface Analysis { inputs: Input[]; ignoredFiles: number }
+export interface Dependency { kind: 'required' | 'optional' | 'incompatible' | 'embedded'; projectId: string | null; versionId: string | null }
+export interface Candidate { provider: Provider; projectId: string; versionId: string; fileId: string; name: string; version: string; filename: string; url: string | null; projectUrl: string; sha1: string | null; sha512: string | null; size: number; published: string; channel: 'release' | 'beta' | 'alpha'; gameVersions: string[]; loaders: Loader[]; dependencies: Dependency[] }
+export interface Entry { inputId: string; sourcePath: string; source: Candidate | null; selected: Candidate | null; candidates: Candidate[]; status: 'updated' | 'unchanged' | 'not_found' | 'no_compatible_version' | 'download_unavailable' | 'dependency_conflict' | 'error'; reason: string | null; action: 'replacement' | 'deduplicated' | 'added_dependency' | 'excluded' | null; requiredBy: string[]; outputPath: string | null }
 export interface Resolution { entries: Entry[]; warnings: string[]; schemaVersion: number; target: Target; includeDependencies: boolean }
 export interface Selection { inputId: string; exclude?: boolean; provider?: Provider; projectId?: string; versionId?: string }
 export interface ResolveRequest { target: Target; providers: Provider[]; includeDependencies: boolean; allowedChannels: ('release' | 'beta' | 'alpha')[]; selections: Selection[] }
 export interface Project { provider: Provider; projectId: string; name: string; projectUrl: string; description: string }
 export interface Progress { stage: string; completed?: number; total?: number; message?: string }
-export interface MigrationReport { status: 'completed' | 'partial' | 'empty' | 'failed' | 'cancelled'; [key: string]: unknown }
+export interface MigrationReport { schemaVersion: number; target: Target; status: 'completed' | 'partial' | 'empty' | 'failed' | 'cancelled'; entries: Entry[]; warnings: string[] }
 export interface Conversion { archive: Blob; report: MigrationReport }
 
 /** Each instance owns a dedicated worker and its temporary browser storage. */

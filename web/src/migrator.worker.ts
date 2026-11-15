@@ -70,5 +70,5 @@ scope.onmessage = async ({ data }: MessageEvent<{ id: number; method: string; ar
       else throw new Error('Unknown worker operation.');
     }
     scope.postMessage({ id, result });
-  } catch (error) { scope.postMessage({ id, error: { code: (error as { code?: string })?.code || 'operation', message: error instanceof Error ? error.message : String(error) } }); }
+  } catch (error) { const message = error instanceof Error ? error.message : String(error); const code = (error as { code?: string })?.code || (/browser storage/i.test(message) ? 'resource' : 'operation'); scope.postMessage({ id, error: { code, message } }); }
 };
