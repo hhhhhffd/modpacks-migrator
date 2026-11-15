@@ -1,0 +1,56 @@
+name: Build artifacts
+on:
+  workflow_dispatch:
+
+# Uploaded artifacts intentionally exclude embedded credentials. Build locally
+# using the README instructions when CurseForge support is required.
+
+jobs:
+  linux:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build Linux executable
+        shell: bash
+        run: |
+          cargo build --locked --release -p modpacks-migrator-server --no-default-features
+          mkdir -p dist
+          install -m 755 target/release/modpacks-migrator-server dist/modpacks-migrator-server-linux-${{ matrix.arch }}
+          cd dist && sha256sum modpacks-migrator-server-linux-${{ matrix.arch }} > checksums.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: modpacks-migrator-linux-${{ matrix.arch }}
+          path: dist/
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
+      - run: npm --prefix web ci
+      - name: Build browser artifacts
+        shell: bash
+        run: |
+          npm --prefix web run build:wasm:no-default
+          npm --prefix web run build
+          mkdir -p dist
+          tar -czf dist/modpacks-migrator-wasm.tar.gz -C web/dist sdk pkg
+          tar -czf dist/modpacks-migrator-web.tar.gz -C web/dist .
+          cd dist && sha256sum *.tar.gz > checksums.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: modpacks-migrator-browser
+          path: dist/

@@ -1,0 +1,40 @@
+name: Checks
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+      - run: cargo fmt --all -- --check
+      - run: cargo test --workspace --no-default-features
+      - run: cargo clippy --workspace --all-targets --no-default-features -- -D warnings
+      - run: cargo check -p modpacks-migrator-wasm --target wasm32-unknown-unknown --no-default-features
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
+      - run: npm --prefix web ci
+      - run: npm --prefix web run build:wasm:no-default
+      - run: npm --prefix web run build
+      - run: npx playwright install --with-deps chromium
+        working-directory: web
+      - run: npm --prefix web run test:e2e
+        env:
+          PLAYWRIGHT_CHROMIUM_EXECUTABLE: ""
