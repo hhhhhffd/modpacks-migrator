@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 
 const archive = Buffer.from('UEsDBBQAAAAAACmSb13pMpUbEwAAABMAAAANAAAAbW9kcy90ZXN0LmphcnN5bnRoZXRpYyBqYXIgYnl0ZXNQSwECFAMUAAAAAAApkm9d6TKVGxMAAAATAAAADQAAAAAAAAAAAAAAgAEAAAAAbW9kcy90ZXN0LmphclBLBQYAAAAAAQABADsAAAA+AAAAAAA=', 'base64');
 const jar = Buffer.from('synthetic jar bytes');
@@ -34,6 +35,43 @@ test('analyzes a local ZIP, reviews alpha, and downloads a report', async ({ pag
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: /Download report/ }).click();
   expect((await download).suggestedFilename()).toBe('migration-report.json');
+});
+
+test('locks target controls while resolving and preserves the confirmed target', async ({ page, context }) => {
+  let signalRequest!: () => void;
+  let releaseRequest!: () => void;
+  const requested = new Promise<void>(resolve => { signalRequest = resolve; });
+  const released = new Promise<void>(resolve => { releaseRequest = resolve; });
+  await context.route('https://api.modrinth.com/**', async route => {
+    if (route.request().url().includes('/version_files')) {
+      signalRequest();
+      await released;
+      await route.fulfill({ json: { [sha512]: version('old', 'release', '2024-01-01T00:00:00Z') }, headers: { 'access-control-allow-origin': '*' } });
+    } else {
+      await route.fulfill({ json: [version('stable', 'release', '2025-01-01T00:00:00Z')], headers: { 'access-control-allow-origin': '*' } });
+    }
+  });
+  await context.route('https://api.curseforge.com/**', route => route.fulfill({ json: { data: { exactMatches: [] } }, headers: { 'access-control-allow-origin': '*' } }));
+  await context.route('https://cdn.modrinth.com/**', route => route.fulfill({ body: jar, headers: { 'access-control-allow-origin': '*' } }));
+  await page.goto('/');
+  await page.locator('input[type=file]').setInputFiles({ name: 'pack.zip', mimeType: 'application/zip', buffer: archive });
+  const versionInput = page.getByPlaceholder('e.g. 1.21.1');
+  await versionInput.fill('1.21.1');
+  await page.getByRole('button', { name: /Analyze pack/ }).click();
+  await requested;
+  await expect(versionInput).toBeDisabled();
+  await expect(page.locator('input[type=file]')).toBeDisabled();
+  await expect(page.locator('.fields select')).toBeDisabled();
+  await expect(page.getByLabel(/Include required dependencies/)).toBeDisabled();
+  releaseRequest();
+  await expect(page.getByRole('heading', { name: 'Check the matches' })).toBeVisible();
+  await expect(versionInput).toHaveValue('1.21.1');
+  await page.getByRole('button', { name: /Confirm and prepare ZIP/ }).click();
+  await expect(page.getByRole('heading', { name: 'Your pack is ready' })).toBeVisible();
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: /Download report/ }).click();
+  const path = await (await downloadPromise).path();
+  expect(JSON.parse(await readFile(path, 'utf8')).target.minecraftVersion).toBe('1.21.1');
 });
 
 test('cancels an in-flight provider request', async ({ page, context }) => {
