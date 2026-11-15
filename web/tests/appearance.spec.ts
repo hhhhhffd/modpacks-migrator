@@ -1,42 +1,41 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 
 const storageKey = 'modpacks-migrator-theme';
 
-test('system follows the device and explicit themes persist across reloads', async ({ page }) => {
+test('initially uses the device theme, then persists explicit toggles', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'light' });
   await page.goto('/');
-  const theme = page.getByLabel('Theme', { exact: true });
   const html = page.locator('html');
-  await expect(theme.locator('option')).toHaveText(['System', 'Light', 'Dark']);
-  expect(await theme.locator('option').evaluateAll(options => options.map(option => (option as HTMLOptionElement).value))).toEqual(['system', 'light', 'dark']);
-  await expect(theme).toHaveValue('system');
-  await expect(html).toHaveAttribute('data-theme-preference', 'system');
+  await expect(html).toHaveAttribute('data-theme-preference', 'light');
   await expect(html).toHaveAttribute('data-theme', 'light');
 
   await page.emulateMedia({ colorScheme: 'dark' });
+  await expect(html).toHaveAttribute('data-theme', 'light');
+  await page.getByRole('button', { name: 'Switch to dark theme' }).click();
+  await expect(html).toHaveAttribute('data-theme-preference', 'dark');
   await expect(html).toHaveAttribute('data-theme', 'dark');
-  await theme.selectOption('light');
+  expect(await page.evaluate(key => localStorage.getItem(key), storageKey)).toBe('dark');
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.reload();
+  await expect(html).toHaveAttribute('data-theme-preference', 'dark');
+  await expect(html).toHaveAttribute('data-theme', 'dark');
+  await page.getByRole('button', { name: 'Switch to light theme' }).click();
   await expect(html).toHaveAttribute('data-theme-preference', 'light');
   await expect(html).toHaveAttribute('data-theme', 'light');
   expect(await page.evaluate(key => localStorage.getItem(key), storageKey)).toBe('light');
-  await page.reload();
-  await expect(theme).toHaveValue('light');
-  await expect(html).toHaveAttribute('data-theme', 'light');
-
-  await theme.selectOption('dark');
-  await page.emulateMedia({ colorScheme: 'light' });
-  await expect(html).toHaveAttribute('data-theme', 'dark');
-  await expect(html).toHaveAttribute('data-theme-preference', 'dark');
-  expect(await page.evaluate(key => localStorage.getItem(key), storageKey)).toBe('dark');
-  await page.reload();
-  await expect(theme).toHaveValue('dark');
-  await expect(html).toHaveAttribute('data-theme', 'dark');
-  await theme.selectOption('system');
-  await expect(html).toHaveAttribute('data-theme-preference', 'system');
-  await expect(html).toHaveAttribute('data-theme', 'light');
-  expect(await page.evaluate(key => localStorage.getItem(key), storageKey)).toBe('system');
   await page.emulateMedia({ colorScheme: 'dark' });
-  await expect(html).toHaveAttribute('data-theme', 'dark');
+  await page.reload();
+  await expect(html).toHaveAttribute('data-theme-preference', 'light');
+  await expect(html).toHaveAttribute('data-theme', 'light');
+  await expect(page.getByRole('button', { name: 'Switch to dark theme' })).toBeVisible();
+});
+
+test('uses a dark device theme on first load when no preference is saved', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await page.goto('/');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.locator('html')).toHaveAttribute('data-theme-preference', 'dark');
+  await expect(page.getByRole('button', { name: 'Switch to light theme' })).toBeVisible();
 });
 
 test('applies a saved theme before the app module runs', async ({ page }) => {
@@ -54,10 +53,10 @@ test('remains usable when localStorage is blocked', async ({ page }) => {
   });
   await page.emulateMedia({ colorScheme: 'light' });
   await page.goto('/');
-  const theme = page.getByLabel('Theme', { exact: true });
-  await expect(theme).toHaveValue('system');
+  const theme = page.getByRole('button', { name: 'Switch to dark theme' });
+  await expect(theme).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Your next world. Your favorite mods.' })).toBeVisible();
-  await theme.selectOption('dark');
+  await theme.click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await expect(page.getByLabel('Minecraft version')).toBeEnabled();
 });
@@ -68,7 +67,7 @@ test('places the source link in the header and the author in the footer', async 
   const header = page.locator('header.topbar');
   const footer = page.locator('footer.footer');
   const brand = header.locator('.brand');
-  const theme = header.getByLabel('Theme', { exact: true });
+  const theme = header.getByRole('button', { name: /Switch to (dark|light) theme/ });
   const source = header.getByRole('link', { name: /Source on GitHub/ });
   await expect(source).toBeVisible();
   await expect(source).toContainText('Source on GitHub');

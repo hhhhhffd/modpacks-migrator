@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
@@ -20,7 +20,7 @@ test('analyzes a local ZIP, reviews alpha, and downloads a report', async ({ pag
   await context.route('https://cdn.modrinth.com/**', route => route.fulfill({ body: jar, headers: { 'access-control-allow-origin': '*' } }));
   await page.goto('/');
   await page.locator('input[type=file]').setInputFiles({ name: 'pack.zip', mimeType: 'application/zip', buffer: archive });
-  await page.getByPlaceholder('e.g. 1.21.1').fill('1.21.1');
+  await page.getByLabel('Minecraft version').selectOption('1.21.1');
   await page.getByRole('button', { name: /Analyze pack/ }).click();
   await expect(page.getByRole('heading', { name: 'Check the matches' })).toBeVisible({ timeout: 30000 });
   await expect(page.locator('.badge.alpha')).toHaveText('alpha');
@@ -58,13 +58,13 @@ test('locks target controls while resolving and preserves the confirmed target',
   await context.route('https://cdn.modrinth.com/**', route => route.fulfill({ body: jar, headers: { 'access-control-allow-origin': '*' } }));
   await page.goto('/');
   await page.locator('input[type=file]').setInputFiles({ name: 'pack.zip', mimeType: 'application/zip', buffer: archive });
-  const versionInput = page.getByPlaceholder('e.g. 1.21.1');
-  await versionInput.fill('1.21.1');
+  const versionInput = page.getByLabel('Minecraft version');
+  await versionInput.selectOption('1.21.1');
   await page.getByRole('button', { name: /Analyze pack/ }).click();
   await requested;
   await expect(versionInput).toBeDisabled();
   await expect(page.locator('input[type=file]')).toBeDisabled();
-  await expect(page.locator('.fields select')).toBeDisabled();
+  await expect(page.getByLabel('Loader')).toBeDisabled();
   await expect(page.getByLabel(/Include required dependencies/)).toBeDisabled();
   releaseRequest();
   await expect(page.getByRole('heading', { name: 'Check the matches' })).toBeVisible();
@@ -87,7 +87,7 @@ test('cancels an in-flight provider request', async ({ page, context }) => {
   });
   await page.goto('/');
   await page.locator('input[type=file]').setInputFiles({ name: 'pack.zip', mimeType: 'application/zip', buffer: archive });
-  await page.getByPlaceholder('e.g. 1.21.1').fill('1.21.1');
+  await page.getByLabel('Minecraft version').selectOption('1.21.1');
   await page.getByRole('button', { name: /Analyze pack/ }).click();
   await requested;
   await page.getByRole('button', { name: 'Cancel' }).click();
@@ -118,7 +118,7 @@ test('keeps removal local, supports undo and search without restarting review', 
   });
   await page.goto('/');
   await page.locator('input[type=file]').setInputFiles({ name: 'pack.zip', mimeType: 'application/zip', buffer: archive });
-  await page.getByLabel('Minecraft version').fill('1.21.1');
+  await page.getByLabel('Minecraft version').selectOption('1.21.1');
   await page.getByRole('button', { name: /Analyze pack/ }).click();
   await expect(page.getByRole('heading', { name: 'Check the matches' })).toBeVisible();
   const initialCalls = calls;
@@ -160,7 +160,7 @@ test('replaces a project explicitly and traps focus during pending search', asyn
   await context.route('https://cdn.modrinth.com/**', route => route.fulfill({ body: jar }));
   await page.goto('/');
   await page.locator('input[type=file]').setInputFiles({ name: 'pack.zip', mimeType: 'application/zip', buffer: archive });
-  await page.getByLabel('Minecraft version').fill('1.21.1');
+  await page.getByLabel('Minecraft version').selectOption('1.21.1');
   await page.getByRole('button', { name: /Analyze pack/ }).click();
   const replaceButton = page.getByRole('button', { name: 'Replace', exact: true });
   await replaceButton.click();
@@ -204,7 +204,7 @@ test('moves blocked dependents out of Ready and restores them with Undo', async 
   });
   await page.goto('/');
   await page.locator('input[type=file]').setInputFiles({ name: 'pack.zip', mimeType: 'application/zip', buffer: archive });
-  await page.getByLabel('Minecraft version').fill('1.21.1');
+  await page.getByLabel('Minecraft version').selectOption('1.21.1');
   await page.getByRole('button', { name: /Analyze pack/ }).click();
   await expect(page.getByRole('button', { name: /^Ready/ })).toHaveText('Ready2');
   const dependency = page.locator('.entry[data-input-id="dependency-Modrinth-library"]');
@@ -237,7 +237,7 @@ test('cancels a background dependency update and safely analyzes again', async (
   });
   await page.goto('/');
   await page.locator('input[type=file]').setInputFiles({ name: 'pack.zip', mimeType: 'application/zip', buffer: archive });
-  await page.getByLabel('Minecraft version').fill('1.21.1');
+  await page.getByLabel('Minecraft version').selectOption('1.21.1');
   await page.getByRole('button', { name: /Analyze pack/ }).click();
   await page.getByLabel('Version for mods/test.jar').selectOption('requires-library');
   await requested;
@@ -259,7 +259,7 @@ test('cancels a background dependency update and safely analyzes again', async (
 test('rejects invalid ZIP without a server fallback', async ({ page }) => {
   await page.goto('/');
   await page.locator('input[type=file]').setInputFiles({ name: 'invalid.zip', mimeType: 'application/zip', buffer: Buffer.from('not a zip') });
-  await page.getByPlaceholder('e.g. 1.21.1').fill('1.21.1');
+  await page.getByLabel('Minecraft version').selectOption('1.21.1');
   await page.getByRole('button', { name: /Analyze pack/ }).click();
   await expect(page.getByRole('alert')).toContainText('ZIP');
 });
