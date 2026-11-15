@@ -14,6 +14,19 @@ let artifacts = new Map<string, SyncHandle>();
 let resolutionCount = 0;
 let controller = new AbortController();
 const reader = new FileReaderSync();
+const cacheLimit = 32 * 1024 * 1024;
+type CachedResponse = { status: number; headers: [string, string][]; body: Uint8Array; size: number };
+const metadataCache = new Map<string, CachedResponse>();
+let cacheSize = 0;
+let cacheGeneration = 0;
+let converting = false;
+function clearMetadataCache() { metadataCache.clear(); cacheSize = 0; cacheGeneration++; }
+async function cacheKey(method: string, url: string, headers: Headers, body: Uint8Array) {
+  // Hash headers too, so credentials never appear in cache keys and variants cannot collide.
+  const prefix = new TextEncoder().encode(JSON.stringify([method, url, Array.from(headers.entries())]));
+  const bytes = new Uint8Array(prefix.length + body.length); bytes.set(prefix); bytes.set(body, prefix.length);
+  return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), b => b.toString(16).padStart(2, '0')).join('');
+}
 function storageError(error: unknown): Error { return Object.assign(new Error(`Browser storage is unavailable or full. Allow site storage and try again. ${error instanceof Error ? error.message : String(error)}`), { code: 'resource' }); }
 function closeFiles() { for (const handle of handles) handle.close(); handles = []; artifacts.clear(); output?.close(); output = undefined; outputFile = undefined; }
 async function cleanup() { controller.abort(); closeFiles(); if (directoryName) { const root = await navigator.storage.getDirectory(); await root.removeEntry(directoryName, { recursive: true }); directoryName = ''; directory = undefined; } }
@@ -40,6 +53,14 @@ const adapter = {
     const headers = new Headers(pairs);
     const hasKey = headers.has('x-api-key');
     if (hasKey && !['https://api.curseforge.com', 'https://edge.forgecdn.net'].includes(parsed.origin)) throw new Error('Credentials cannot be sent to this origin.');
+    const generation = cacheGeneration;
+    const cacheable = !!input && !converting && (method === 'GET' || method === 'POST') && ['https://api.modrinth.com', 'https://api.curseforge.com'].includes(parsed.origin);
+    const key = cacheable ? await cacheKey(method, url, headers, body) : undefined;
+    const cached = key && generation === cacheGeneration ? metadataCache.get(key) : undefined;
+    if (cached) {
+      if (cached.body.length > maxBytes) throw new Error('Provider response exceeds the size limit.');
+      return { status: cached.status, headers: cached.headers.map(([name, value]) => [name, value] as [string, string]), body: cached.body.slice() };
+    }
     const timeout = AbortSignal.timeout(45_000);
     const response = await fetch(url, { method, headers, body: body.length ? new Uint8Array(body) : undefined, redirect: 'error', signal: AbortSignal.any([controller.signal, timeout]), credentials: 'omit', referrerPolicy: 'no-referrer' });
     const length = Number(response.headers.get('content-length'));
@@ -47,7 +68,15 @@ const adapter = {
     const stream = response.body?.getReader(); const chunks: Uint8Array[] = []; let total = 0;
     if (stream) { try { while (true) { const { done, value } = await stream.read(); if (done) break; total += value.length; if (total > maxBytes) { await stream.cancel(); throw new Error('Provider response exceeds the size limit.'); } chunks.push(value); } } finally { stream.releaseLock(); } }
     const bytes = new Uint8Array(total); let offset = 0; for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
-    return { status: response.status, headers: Array.from(response.headers.entries()), body: bytes };
+    const responseHeaders = Array.from(response.headers.entries());
+    const size = bytes.length + responseHeaders.reduce((sum, [name, value]) => sum + 2 * (name.length + value.length), 0) + 512;
+    if (key && response.ok && generation === cacheGeneration && size <= cacheLimit) {
+      const previous = metadataCache.get(key); if (previous) cacheSize -= previous.size;
+      metadataCache.delete(key);
+      while (cacheSize + size > cacheLimit) { const oldest = metadataCache.keys().next().value!; cacheSize -= metadataCache.get(oldest)!.size; metadataCache.delete(oldest); }
+      metadataCache.set(key, { status: response.status, headers: responseHeaders, body: bytes.slice(), size }); cacheSize += size;
+    }
+    return { status: response.status, headers: responseHeaders, body: bytes };
   },
 };
 async function getMigrator() {
@@ -58,15 +87,16 @@ scope.onmessage = async ({ data }: MessageEvent<{ id: number; method: string; ar
   const { id, method, args } = data;
   try {
     let result: unknown;
-    if (method === 'dispose') { migrator?.free(); migrator = undefined; await cleanup(); }
-    else if (method === 'cancel') { controller.abort(); controller = new AbortController(); }
+    if (method === 'dispose') { clearMetadataCache(); migrator?.free(); migrator = undefined; await cleanup(); }
+    else if (method === 'cancel') { clearMetadataCache(); controller.abort(); controller = new AbortController(); }
     else {
+      if (method === 'analyzeZip') clearMetadataCache();
       const instance = await getMigrator();
       if (method === 'analyzeZip') { input = args[0] as Blob; result = instance.analyzeZip(input.size); }
       else if (method === 'resolveMods') { result = await instance.resolveMods(args[0]); resolutionCount = (result as { entries: unknown[] }).entries.length; }
       else if (method === 'searchProjects') result = await instance.searchProjects(args[0] as string, args[1] as string);
       else if (method === 'listCandidates') result = await instance.listCandidates(args[0] as string, args[1] as string, args[2]);
-      else if (method === 'convertZip') { await prepareStorage(resolutionCount); const report = await instance.convertZip(); output!.flush(); output!.close(); output = undefined; const archive = await outputFile!.getFile(); result = { archive, report }; }
+      else if (method === 'convertZip') { await prepareStorage(resolutionCount); converting = true; try { const report = await instance.convertZip(); output!.flush(); output!.close(); output = undefined; const archive = await outputFile!.getFile(); result = { archive, report }; } finally { converting = false; } }
       else throw new Error('Unknown worker operation.');
     }
     scope.postMessage({ id, result });
