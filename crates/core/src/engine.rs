@@ -59,7 +59,10 @@ impl<T: HttpTransport> Engine<T> {
         if !trusted {
             return Err(Error::Protocol("Untrusted provider URL".into()));
         }
-        let mut headers = vec![("User-Agent".into(), "modpacks-migrator/0.1".into())];
+        let mut headers = vec![(
+            "User-Agent".into(),
+            concat!("modpacks-migrator/", env!("CARGO_PKG_VERSION")).into(),
+        )];
         if !body.is_empty() {
             headers.push(("Content-Type".into(), "application/json".into()));
         }

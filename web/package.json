@@ -1,7 +1,7 @@
 {
   "name": "modpacks-migrator-web",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": { "dev": "vite", "build:wasm": "cargo build --manifest-path ../Cargo.toml -p modpacks-migrator-wasm --target wasm32-unknown-unknown --release && wasm-bindgen ../target/wasm32-unknown-unknown/release/modpacks_migrator_wasm.wasm --target web --out-dir public/pkg", "build:wasm:no-default": "cargo build --manifest-path ../Cargo.toml -p modpacks-migrator-wasm --target wasm32-unknown-unknown --release --no-default-features && wasm-bindgen ../target/wasm32-unknown-unknown/release/modpacks_migrator_wasm.wasm --target web --out-dir public/pkg", "build": "tsc --noEmit && vite build && npm run build:sdk", "build:sdk": "vite build --config vite.sdk.config.ts && tsc -p tsconfig.sdk.json", "test:e2e": "playwright test" },
   "dependencies": { "react": "^19.0.0", "react-dom": "^19.0.0" },
