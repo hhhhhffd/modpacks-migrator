@@ -43,6 +43,40 @@ A build-time key does not override CORS. If a provider API or CDN does not permi
 
 Requests do not follow redirects automatically, so credentials cannot leak to redirect destinations. An unsupported redirect is reported as a failed operation. Linux downloads use a separately validated redirect flow.
 
+## Prepare a signed `_k0t1k` launcher plugin
+
+This is the same **Ed25519 + SHA-256** protocol used by the launcher's RatScan and packconv plugins, not OS code signing. It covers the browser WASM bindings, not the independent Linux API or the whole website.
+
+Build the bindings first, then prepare a **new** local output directory:
+
+```sh
+npm --prefix web run build:wasm
+node scripts/release-plugin.mjs
+```
+
+The preparer uses `K0T1K_PLUGIN_KEY`, or `~/.config/k0t1k/plugin-signing-key.pem` by default. It requires an Ed25519 key matching the **existing launcher's pinned public key**. It never creates or prints a private key and never publishes anything. Existing output directories are rejected. With no `--out`, a fresh directory under `.tmp/` is used; `--pkg` selects a different prebuilt bindings directory. The preparer does not rebuild WASM or establish which source commit produced those prebuilt files.
+
+Output consists of exactly:
+
+```text
+plugin.json
+plugin.json.sig
+modpacks_migrator_wasm.js
+modpacks_migrator_wasm_bg.wasm
+```
+
+The manifest identifies `modpacks-migrator`, versioned from the workspace, plugin API `1`, and `minLauncher: "0.1.0"`. Its `files` map contains SHA-256 hashes. The Base64 signature covers the exact bytes `_k0t1k-plugin\n` followed by the unchanged `plugin.json` bytes. Signature and file integrity are checked before preparation reports success. Default local builds include the extractable CurseForge key; the signed package therefore includes it too. Never publish that package unintentionally.
+
+**Launcher integration is separate.** The current launcher only registers its existing plugins. It must register `modpacks-migrator` with `hhhhhffd/modpacks-migrator`, provide a baseline and a worker/IO adapter for this project's `BrowserMigrator` exports before this plugin can run. Signing alone does not add that integration or make its exports interchangeable with RatScan/packconv. The minimum version records the manifest protocol, not automatic support for this new plugin.
+
+The launcher must verify with its built-in public key, then validate plugin ID/API/minimum version and reject non-newer releases before downloading and checking every file hash. Do not replace its pinned key with a key downloaded alongside the release. See the existing launcher verifier for the rollback policy. No launcher files, installed plugins, GitHub tags, or releases are modified by preparation.
+
+Check the signing helper without a production key:
+
+```sh
+node --test scripts/release-plugin.test.mjs
+```
+
 ## Build the static website
 
 ```sh
