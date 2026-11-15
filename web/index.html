@@ -20,7 +20,7 @@
       const theme = preference === 'system'
         ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
         : preference;
-      document.documentElement.dataset.themePreference = preference;
+      document.documentElement.dataset.themePreference = theme;
       document.documentElement.dataset.theme = theme;
       document.querySelector('meta[name="theme-color"]').content = theme === 'dark' ? '#10121c' : '#eceef5';
     </script>

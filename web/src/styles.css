@@ -98,7 +98,10 @@ h1, h2, h3 { font-family: var(--display); margin: 0; }
 /* Top bar */
 .topbar { min-height: 76px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--line); margin-bottom: 24px; }
 .header-actions { display: flex; align-items: center; gap: 24px; }
-.theme-picker select { width: 108px; height: 36px; border-radius: 10px; font-size: 13px; }
+.header-actions .theme-toggle { width: 38px; height: 38px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); border-radius: 50%; }
+.version-catalog-error { margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: var(--tangerine-soft); color: var(--tangerine-ink); font-size: 12px; }
+.version-catalog-error p { margin: 0; line-height: 1.5; }
+.version-catalog-error .quiet-button { padding: 6px 0 0; }
 .brand { display: flex; align-items: center; gap: 10px; font: 800 19px var(--display); letter-spacing: -.4px; }
 .brand-mark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; background: var(--blue); color: #fff; box-shadow: 0 6px 14px -6px var(--blue); }
 .brand-second { color: var(--ink-3); font-weight: 500; margin-left: 2px; }
@@ -170,7 +173,10 @@ h1 > span { color: var(--lavender); }
 .upload.dragging { border-color: var(--accent-ink); background: var(--blue-soft); transform: scale(1.01); }
 .upload.has-file { border-style: solid; border-color: #b6eed6; background: var(--mint-soft); }
 .has-file .upload-art { background: var(--mint); color: var(--surface); box-shadow: 0 10px 20px -10px var(--mint); }
-.fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }
+.destination { min-width: 0; margin: 18px 0 0; padding: 0; border: 0; }
+.destination legend { padding: 0; font-size: 14px; font-weight: 800; }
+.destination > p { margin: 5px 0 0; color: var(--ink-2); font-size: 12px; line-height: 1.5; }
+.fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; margin-top: 12px; }
 .fields label { display: flex; flex-direction: column; gap: 7px; font-size: 13px; font-weight: 700; color: var(--ink-2); }
 input:not([type=file]):not([type=checkbox]), select { width: 100%; min-width: 0; height: 46px; border: 1.5px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--ink); padding: 0 14px; font-size: 15px; transition: border-color 160ms ease, box-shadow 160ms ease; }
 input:not([type=file]):not([type=checkbox]):focus-visible, select:focus-visible { outline: 0; border-color: var(--accent-ink); box-shadow: 0 0 0 4px var(--focus-ring); }

@@ -38,7 +38,7 @@ try {
   await page.evaluate(() => document.fonts.ready);
   await page.screenshot({ path: join(output, 'landing.png'), fullPage: true });
   await page.locator('input[type=file]').setInputFiles(resolve(archive));
-  await page.getByLabel('Minecraft version').fill(target);
+  await page.getByLabel('Minecraft version').selectOption(target);
   await page.getByRole('button', { name: 'Analyze pack' }).click();
   await Promise.race([
     page.getByRole('heading', { name: 'Check the matches' }).waitFor({ timeout: 360_000 }),

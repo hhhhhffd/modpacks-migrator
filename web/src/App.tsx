@@ -16,6 +16,8 @@ function Icon({ name, size = 20 }: { name: string; size?: number }) {
     link: <><path d="M14 3h7v7m0-7L10 14M10 5H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5" /></>,
     download: <path d="M12 3v13m-5-5 5 5 5-5M4 17v4h16v-4" />,
     minus: <path d="M5 12h14" />,
+    sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5" /></>,
+    moon: <path d="M20.9 13A9 9 0 0 1 11 3.1 9 9 0 1 0 20.9 13Z" />,
     undo: <><path d="M4 10h10a6 6 0 0 1 0 12M4 10l5-5m-5 5 5 5" /></>,
     github: <><path d="M9 19c-4 1-4-2-6-2m12 5v-4c0-1 .1-1.5-.5-2 4-.4 7.5-2 7.5-7a5.4 5.4 0 0 0-1.5-3.7A5 5 0 0 0 20 1s-1.3-.4-4 1.5a14 14 0 0 0-8 0C5.3.6 4 1 4 1a5 5 0 0 0-.5 4.3A5.4 5.4 0 0 0 2 9c0 5 3.5 6.6 7.5 7-.6.5-.6 1.2-.5 2v4" /></>,
   };
@@ -48,33 +50,57 @@ function isReady(entry: Entry) { return !!entry.selected && (entry.status === 'u
 function Channel({ candidate }: { candidate: Candidate }) { return <span className={`badge ${candidate.channel}`}>{candidate.channel}</span>; }
 
 type Filter = 'all' | 'ready' | 'attention' | 'removed';
-type ThemePreference = 'system' | 'light' | 'dark';
+type Theme = 'light' | 'dark';
+type GameVersion = { version: string; version_type: 'release' | 'snapshot' | 'alpha' | 'beta' };
 export default function App() {
-  const [themePreference, setThemePreference] = useState<ThemePreference>(() => {
-    const preference = document.documentElement.dataset.themePreference;
-    return preference === 'light' || preference === 'dark' ? preference : 'system';
-  });
+  const [theme, setTheme] = useState<Theme>(() => document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
   useEffect(() => {
-    const deviceTheme = window.matchMedia('(prefers-color-scheme: dark)');
-    function applyTheme() {
-      const theme = themePreference === 'system' ? (deviceTheme.matches ? 'dark' : 'light') : themePreference;
-      document.documentElement.dataset.themePreference = themePreference;
-      document.documentElement.dataset.theme = theme;
-      document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')!.content = theme === 'dark' ? '#10121c' : '#eceef5';
-    }
-    applyTheme();
-    if (themePreference !== 'system') return;
-    deviceTheme.addEventListener('change', applyTheme);
-    return () => deviceTheme.removeEventListener('change', applyTheme);
-  }, [themePreference]);
-  function changeTheme(preference: ThemePreference) {
-    setThemePreference(preference);
-    try { localStorage.setItem('modpacks-migrator-theme', preference); }
+    document.documentElement.dataset.themePreference = theme;
+    document.documentElement.dataset.theme = theme;
+    document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')!.content = theme === 'dark' ? '#10121c' : '#eceef5';
+  }, [theme]);
+  function toggleTheme() {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    try { localStorage.setItem('modpacks-migrator-theme', next); }
     catch (error) { console.warn('Theme preference could not be saved; it will apply to this tab only.', error); }
   }
   const engine = useRef<Migrator | null>(null);
   const [file, setFile] = useState<File>();
   const [version, setVersion] = useState('');
+  const [gameVersions, setGameVersions] = useState<GameVersion[]>([]);
+  const [versionsLoading, setVersionsLoading] = useState(true);
+  const [versionsError, setVersionsError] = useState('');
+  const [versionsAttempt, setVersionsAttempt] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    setVersionsLoading(true);
+    setVersionsError('');
+    async function loadVersions() {
+      try {
+        const response = await fetch('https://api.modrinth.com/v2/tag/game_version', {
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]),
+          credentials: 'omit', redirect: 'error', referrerPolicy: 'no-referrer',
+        });
+        if (!response.ok) throw new Error(`Minecraft version catalog returned HTTP ${response.status}.`);
+        const text = await response.text();
+        if (text.length > 1024 * 1024) throw new Error('Minecraft version catalog exceeds the size limit.');
+        const rows: unknown = JSON.parse(text);
+        if (!Array.isArray(rows) || !rows.length || rows.length > 5000 || !rows.every((row): row is GameVersion =>
+          !!row && typeof row === 'object' && typeof row.version === 'string' && row.version.length > 0 && row.version.length < 80 &&
+          ['release', 'snapshot', 'alpha', 'beta'].includes(row.version_type))) {
+          throw new Error('Minecraft version catalog has an invalid format.');
+        }
+        if (!controller.signal.aborted) setGameVersions(rows);
+      } catch (error) {
+        if (!controller.signal.aborted) setVersionsError(`Could not load Minecraft versions. ${concise(String(error))}`);
+      } finally {
+        if (!controller.signal.aborted) setVersionsLoading(false);
+      }
+    }
+    void loadVersions();
+    return () => controller.abort();
+  }, [versionsAttempt]);
   const [loader, setLoader] = useState<Loader>('fabric');
   const [dependencies, setDependencies] = useState(true);
   const [selections, setSelections] = useState<Selection[]>([]);
@@ -211,7 +237,7 @@ export default function App() {
     <header className="topbar page-width">
       <a className="brand" href="/" aria-label="Modpack Migrator home"><span className="brand-mark"><Icon name="box" size={18} /></span><span>modpack<span className="brand-second">migrator</span></span></a>
       <div className="header-actions">
-        <label className="theme-picker"><span className="visually-hidden">Theme</span><select aria-label="Theme" value={themePreference} onChange={event => changeTheme(event.target.value as ThemePreference)}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+        <button className="theme-toggle icon-button" aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`} onClick={toggleTheme}><Icon name={theme === 'dark' ? 'sun' : 'moon'} size={19} /></button>
         <nav aria-label="Project links"><a className="repo-link" href={repository} target="_blank" rel="noreferrer">Source on GitHub</a></nav>
       </div>
     </header>
@@ -228,9 +254,15 @@ export default function App() {
         <div className="setup-content" hidden={!!resolution && !editingSetup}>
           <h2 id="setup-title" className="visually-hidden">Start with your modpack</h2>
           <label className={`upload ${file ? 'has-file' : ''} ${dragging ? 'dragging' : ''}`} onDragOver={event => { event.preventDefault(); if (!locked) setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={event => { event.preventDefault(); setDragging(false); chooseFile(event.dataTransfer.files[0]); }}>
-            <span className="upload-art"><Icon name={file ? 'box' : 'upload'} size={22} /></span><span className="upload-text"><strong>{file ? file.name : 'Drop your modpack ZIP'}</strong><span className="upload-description">{file ? `${(file.size / 1024 / 1024).toFixed(1)} MB · click to choose another` : <>or <span className="upload-browse">browse files</span> · JARs inside, up to 256 MB</>}</span></span><input aria-label="Modpack ZIP" disabled={locked} type="file" accept=".zip,application/zip" onChange={event => chooseFile(event.target.files?.[0])} />
+            <span className="upload-art"><Icon name={file ? 'box' : 'upload'} size={22} /></span><span className="upload-text"><strong>{file ? file.name : 'Drop your current modpack ZIP'}</strong><span className="upload-description">{file ? `${(file.size / 1024 / 1024).toFixed(1)} MB · click to choose another` : <>or <span className="upload-browse">browse files</span> · JARs inside, up to 256 MB</>}</span></span><input aria-label="Modpack ZIP" disabled={locked} type="file" accept=".zip,application/zip" onChange={event => chooseFile(event.target.files?.[0])} />
           </label>
-          <div className="fields"><label>Minecraft version<input disabled={locked} placeholder="e.g. 1.21.1" list="minecraft-versions" value={version} onChange={event => { setVersion(event.target.value); resetPreview(); }} /><datalist id="minecraft-versions"><option value="1.21.5" /><option value="1.21.1" /><option value="1.20.1" /></datalist></label><label>Loader<select disabled={locked} value={loader} onChange={event => { setLoader(event.target.value as Loader); resetPreview(); }}><option value="fabric">Fabric</option><option value="forge">Forge</option><option value="neoforge">NeoForge</option><option value="quilt">Quilt</option></select></label></div>
+          <fieldset className="destination"><legend>Your new modpack</legend><p>Choose the version and loader to migrate to, not the original pack’s.</p>
+          <div className="fields">
+            <label>Minecraft version<select aria-label="Minecraft version" disabled={locked || versionsLoading || !gameVersions.length} value={version} onChange={event => { setVersion(event.target.value); resetPreview(); }}><option value="" disabled>{versionsLoading ? 'Loading versions…' : 'Choose a version'}</option><optgroup label="Releases">{gameVersions.filter(item => item.version_type === 'release').map(item => <option key={item.version} value={item.version}>{item.version}</option>)}</optgroup><optgroup label="Snapshots & prereleases">{gameVersions.filter(item => item.version_type === 'snapshot').map(item => <option key={item.version} value={item.version}>{item.version}</option>)}</optgroup><optgroup label="Legacy alpha & beta">{gameVersions.filter(item => item.version_type === 'alpha' || item.version_type === 'beta').map(item => <option key={item.version} value={item.version}>{item.version}</option>)}</optgroup></select></label>
+            <label>Loader<select aria-label="Loader" disabled={locked} value={loader} onChange={event => { setLoader(event.target.value as Loader); resetPreview(); }}><option value="fabric">Fabric</option><option value="forge">Forge</option><option value="neoforge">NeoForge</option><option value="quilt">Quilt</option></select></label>
+          </div>
+          {versionsError && <div className="version-catalog-error" role="alert"><p>{versionsError}</p><button className="quiet-button" disabled={versionsLoading || locked} onClick={() => setVersionsAttempt(attempt => attempt + 1)}>Retry versions</button></div>}
+          </fieldset>
           <label className="check"><input disabled={locked} type="checkbox" checked={dependencies} onChange={event => { setDependencies(event.target.checked); resetPreview(); }} /><span>Include required dependencies<small>Libraries your mods need to start.</small></span></label>
           <button className="primary analyze-button" disabled={!file || !version.trim() || locked} onClick={() => void run('Finding compatible mods', analyze)}>{busy === 'Finding compatible mods' ? <><span className="spinner" /> Analyzing your pack</> : <>Analyze pack <Icon name="arrow" size={18} /></>}</button>
           {resolution && <button className="quiet-button return-review" onClick={() => setEditingSetup(false)}>Back to your matches <Icon name="arrow" size={15} /></button>}
