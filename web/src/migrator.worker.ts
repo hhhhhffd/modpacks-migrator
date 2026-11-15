@@ -15,12 +15,19 @@ let resolutionCount = 0;
 let controller = new AbortController();
 const reader = new FileReaderSync();
 const cacheLimit = 32 * 1024 * 1024;
-type CachedResponse = { status: number; headers: [string, string][]; body: Uint8Array; size: number };
+type CachedResponse = { status: number; headers: [string, string][]; body: Uint8Array; size: number } | { error: string; name: string; size: number };
 const metadataCache = new Map<string, CachedResponse>();
 let cacheSize = 0;
 let cacheGeneration = 0;
 let converting = false;
 function clearMetadataCache() { metadataCache.clear(); cacheSize = 0; cacheGeneration++; }
+function cacheMetadata(key: string, entry: CachedResponse) {
+  if (entry.size > cacheLimit) return;
+  const previous = metadataCache.get(key); if (previous) cacheSize -= previous.size;
+  metadataCache.delete(key);
+  while (cacheSize + entry.size > cacheLimit) { const oldest = metadataCache.keys().next().value!; cacheSize -= metadataCache.get(oldest)!.size; metadataCache.delete(oldest); }
+  metadataCache.set(key, entry); cacheSize += entry.size;
+}
 async function cacheKey(method: string, url: string, headers: Headers, body: Uint8Array) {
   // Hash headers too, so credentials never appear in cache keys and variants cannot collide.
   const prefix = new TextEncoder().encode(JSON.stringify([method, url, Array.from(headers.entries())]));
@@ -58,11 +65,22 @@ const adapter = {
     const key = cacheable ? await cacheKey(method, url, headers, body) : undefined;
     const cached = key && generation === cacheGeneration ? metadataCache.get(key) : undefined;
     if (cached) {
+      if ('error' in cached) throw Object.assign(new Error(cached.error), { name: cached.name });
       if (cached.body.length > maxBytes) throw new Error('Provider response exceeds the size limit.');
       return { status: cached.status, headers: cached.headers.map(([name, value]) => [name, value] as [string, string]), body: cached.body.slice() };
     }
     const timeout = AbortSignal.timeout(45_000);
-    const response = await fetch(url, { method, headers, body: body.length ? new Uint8Array(body) : undefined, redirect: 'error', signal: AbortSignal.any([controller.signal, timeout]), credentials: 'omit', referrerPolicy: 'no-referrer' });
+    let response: Response;
+    try {
+      response = await fetch(url, { method, headers, body: body.length ? new Uint8Array(body) : undefined, redirect: 'error', signal: AbortSignal.any([controller.signal, timeout]), credentials: 'omit', referrerPolicy: 'no-referrer' });
+    } catch (error) {
+      if (key && generation === cacheGeneration && !controller.signal.aborted) {
+        const message = error instanceof Error ? error.message : String(error);
+        const name = error instanceof Error ? error.name : 'Error';
+        cacheMetadata(key, { error: message, name, size: 512 + 2 * (message.length + name.length) });
+      }
+      throw error;
+    }
     const length = Number(response.headers.get('content-length'));
     if (Number.isFinite(length) && length > maxBytes) throw new Error('Provider response exceeds the size limit.');
     const stream = response.body?.getReader(); const chunks: Uint8Array[] = []; let total = 0;
@@ -70,12 +88,7 @@ const adapter = {
     const bytes = new Uint8Array(total); let offset = 0; for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
     const responseHeaders = Array.from(response.headers.entries());
     const size = bytes.length + responseHeaders.reduce((sum, [name, value]) => sum + 2 * (name.length + value.length), 0) + 512;
-    if (key && response.ok && generation === cacheGeneration && size <= cacheLimit) {
-      const previous = metadataCache.get(key); if (previous) cacheSize -= previous.size;
-      metadataCache.delete(key);
-      while (cacheSize + size > cacheLimit) { const oldest = metadataCache.keys().next().value!; cacheSize -= metadataCache.get(oldest)!.size; metadataCache.delete(oldest); }
-      metadataCache.set(key, { status: response.status, headers: responseHeaders, body: bytes.slice(), size }); cacheSize += size;
-    }
+    if (key && generation === cacheGeneration) cacheMetadata(key, { status: response.status, headers: responseHeaders, body: bytes.slice(), size });
     return { status: response.status, headers: responseHeaders, body: bytes };
   },
 };

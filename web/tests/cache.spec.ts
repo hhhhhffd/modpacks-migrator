@@ -60,27 +60,37 @@ test('reuses successful metadata across selections and invalidates it for a new 
   expect(result.newArchiveCount).toBe(4);
 });
 
-test('retries transient metadata failures on the next resolution', async ({ page, context }) => {
+test('snapshots metadata failures until the next analysis', async ({ page, context }) => {
   let identificationRequests = 0;
   await context.route('https://api.modrinth.com/**', async route => {
     if (route.request().url().includes('/version_files')) {
       identificationRequests++;
-      if (identificationRequests <= 3) return route.fulfill({ status: 503, headers: { 'access-control-allow-origin': '*' } });
+      if (identificationRequests === 1) return route.fulfill({ status: 503, headers: { 'access-control-allow-origin': '*' } });
       return route.fulfill({ json: { [sha512]: version('old') }, headers: { 'access-control-allow-origin': '*' } });
     }
     await route.fulfill({ json: [version('new')], headers: { 'access-control-allow-origin': '*' } });
   });
+  await page.exposeFunction('identificationCount', () => identificationRequests);
   await page.goto('/');
   const result = await page.evaluate(async bytes => {
     const { Migrator } = await import('/src/migrator.ts');
     const migrator = new Migrator();
+    const count = () => (window as unknown as { identificationCount(): Promise<number> }).identificationCount();
     const request = { target: { minecraftVersion: '1.21.1', loader: 'fabric' as const }, providers: ['modrinth' as const], includeDependencies: true, allowedChannels: ['release' as const], selections: [] };
     try {
       await migrator.analyzeZip(new Uint8Array(bytes));
-      await migrator.resolveMods(request);
-      return (await migrator.resolveMods(request)).entries[0].selected?.versionId;
+      const first = await migrator.resolveMods(request);
+      const second = await migrator.resolveMods(request);
+      const beforeReanalysis = await count();
+      await migrator.analyzeZip(new Uint8Array(bytes));
+      const recovered = await migrator.resolveMods(request);
+      return { first: first.entries[0], second: second.entries[0], beforeReanalysis, recovered: recovered.entries[0] };
     } finally { await migrator.dispose(); }
   }, Array.from(archive));
-  expect(result).toBe('new');
-  expect(identificationRequests).toBe(4);
+  expect(result.first.status).toBe('error');
+  expect(result.second.status).toBe('error');
+  expect(result.second.reason).toBe(result.first.reason);
+  expect(result.beforeReanalysis).toBe(1);
+  expect(result.recovered.selected?.versionId).toBe('new');
+  expect(identificationRequests).toBe(2);
 });
