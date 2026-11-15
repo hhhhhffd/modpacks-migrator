@@ -92,7 +92,7 @@ try {
   const reportDir = join(output, 'report');
   await mkdir(reportDir);
   await reportDownload.saveAs(join(reportDir, 'migration-report.json'));
-  const zipButton = page.getByRole('button', { name: 'Download ZIP' });
+  const zipButton = page.locator('.result').getByRole('button', { name: 'Download ZIP' });
   if (await zipButton.count()) {
     const zipPromise = page.waitForEvent('download');
     await zipButton.click();

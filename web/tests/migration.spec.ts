@@ -38,6 +38,23 @@ test('analyzes a local ZIP, reviews alpha, and downloads a report', async ({ pag
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: /Download report/ }).click();
   expect((await download).suggestedFilename()).toBe('migration-report.json');
+  const footer = page.locator('.preview-footer');
+  await expect(footer).toHaveCSS('position', 'static');
+  await expect(footer).toContainText('Pack built · 1 JAR included');
+  await expect(footer.getByRole('button', { name: 'Build modpack' })).toBeVisible();
+  const zipDownload = page.waitForEvent('download');
+  await footer.getByRole('button', { name: 'Download ZIP' }).click();
+  expect((await zipDownload).suggestedFilename()).toBe('migrated-modpack.zip');
+  await page.setViewportSize({ width: 768, height: 1024 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(footer.getByRole('button', { name: 'Download ZIP' })).toBeVisible();
+  await expect(footer.getByRole('button', { name: 'Build modpack' })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByLabel('Version for mods/test.jar').selectOption('alpha1');
+  await expect(footer.getByRole('button', { name: 'Download ZIP' })).toHaveCount(0);
+  await expect(page.locator('.result')).toHaveCount(0);
+  await expect(footer.getByRole('button', { name: 'Build modpack' })).toBeEnabled();
 });
 
 test('locks target controls while resolving and preserves the confirmed target', async ({ page, context }) => {
