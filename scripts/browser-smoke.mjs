@@ -12,11 +12,16 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PAT
 const failures = [];
 const pageErrors = [];
 const responses = new Map();
+let metadataRequests = 0;
+let editCheck;
 let page;
 try {
   const context = await browser.newContext({ acceptDownloads: true, viewport: { width: 1440, height: 1050 } });
   page = await context.newPage();
   page.on('pageerror', error => pageErrors.push(error.message));
+  page.on('request', request => {
+    if (['api.modrinth.com', 'api.curseforge.com'].includes(new URL(request.url()).hostname)) metadataRequests++;
+  });
   page.on('requestfailed', request => {
     const url = new URL(request.url());
     if (url.protocol === 'https:') failures.push({ host: url.hostname, error: request.failure()?.errorText });
@@ -29,7 +34,8 @@ try {
     }
   });
   await page.goto(process.env.APP_URL || 'http://127.0.0.1:3000', { waitUntil: 'domcontentloaded', timeout: 60_000 });
-  await page.getByRole('heading', { name: 'New version. Same modpack.' }).waitFor({ timeout: 60_000 });
+  await page.getByRole('heading', { name: 'Your next world. Your favorite mods.' }).waitFor({ timeout: 60_000 });
+  await page.evaluate(() => document.fonts.ready);
   await page.screenshot({ path: join(output, 'landing.png'), fullPage: true });
   await page.locator('input[type=file]').setInputFiles(resolve(archive));
   await page.getByLabel('Minecraft version').fill(target);
@@ -41,12 +47,35 @@ try {
   const preview = {
     entries: await page.locator('.entry').count(),
     selected: await page.locator('.entry-target .badge').count(),
-    warnings: await page.locator('.notice').allTextContents(),
+    warnings: await page.locator('.provider-notice').allTextContents(),
   };
   console.log('Preview', JSON.stringify(preview));
-  await page.locator('.preview').scrollIntoViewIfNeeded();
+  if (!metadataRequests) throw new Error('No provider requests were observed; network reuse cannot be measured.');
+  await page.locator('.preview').evaluate(element => element.scrollIntoView({ block: 'start' }));
   await page.screenshot({ path: join(output, 'preview.png') });
-  await page.getByRole('button', { name: 'Confirm and prepare ZIP' }).click();
+  if (preview.selected) {
+    const inputId = await page.locator('.entry').filter({ has: page.locator('.entry-target .badge') }).first().getAttribute('data-input-id');
+    const row = page.locator(`.entry[data-input-id="${inputId}"]`);
+    await row.scrollIntoViewIfNeeded();
+    const scrollBefore = await page.evaluate(() => scrollY);
+    const requestsBefore = metadataRequests;
+    const started = performance.now();
+    await row.getByRole('button', { name: /^Remove / }).click();
+    await page.locator('.selection-status').filter({ hasText: 'Changes saved locally' }).waitFor();
+    const removeMs = Math.round(performance.now() - started);
+    const scrollAfter = await page.evaluate(() => scrollY);
+    await row.getByRole('button', { name: 'Undo' }).click();
+    await page.locator('.selection-status').filter({ hasText: 'Changes saved locally' }).waitFor();
+    editCheck = { removeMs, newMetadataRequests: metadataRequests - requestsBefore, scrollShift: Math.abs(scrollAfter - scrollBefore) };
+    console.log('Remove / Undo', JSON.stringify(editCheck));
+    if (editCheck.newMetadataRequests || editCheck.scrollShift > 2) throw new Error('A local edit repeated provider work or moved the page.');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await row.scrollIntoViewIfNeeded();
+    if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error('The mobile interface overflows horizontally.');
+    await page.screenshot({ path: join(output, 'mobile-review.png') });
+    await page.setViewportSize({ width: 1440, height: 1050 });
+  }
+  await page.getByRole('button', { name: 'Build modpack' }).click();
   await Promise.race([
     page.locator('.result').waitFor({ timeout: 360_000 }),
     page.getByRole('alert').waitFor({ timeout: 360_000 }).then(async () => { throw new Error(await page.getByRole('alert').innerText()); }),
@@ -70,7 +99,7 @@ try {
   }
   await page.locator('.result').scrollIntoViewIfNeeded();
   await page.screenshot({ path: join(output, 'result.png') });
-  const summary = { target, preview, result, pageErrors, networkFailures: failures, responses: Object.fromEntries(responses) };
+  const summary = { target, preview, editCheck, result, pageErrors, networkFailures: failures, responses: Object.fromEntries(responses) };
   await writeFile(join(output, 'summary.json'), JSON.stringify(summary, null, 2));
   console.log('Browser errors', JSON.stringify(pageErrors));
   console.log('Provider responses', JSON.stringify(Object.fromEntries(responses)));

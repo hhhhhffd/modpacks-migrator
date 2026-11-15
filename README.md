@@ -23,7 +23,11 @@ npm --prefix web run build:wasm
 npm --prefix web run dev
 ```
 
-Open **http://localhost:3000**. Select a ZIP, enter a target Minecraft version, choose a loader, and analyze. Review proposed versions and dependencies, change versions or replace projects if needed, then confirm and prepare the ZIP.
+Open **http://localhost:3000**. Select a ZIP, enter a target Minecraft version, choose a loader, and analyze. Search/filter the matches, choose versions or replace projects, then click **Build modpack**. **Remove** excludes an entry; **Undo** restores its previous version choice. A project still required by another mod can appear as a separate **Required dependency** row. Remove that dependency row to also block its mandatory dependents. Edits stay in the current review instead of restarting the archive scan.
+
+Browser analysis uses a bounded 32 MiB in-memory provider snapshot, including provider errors, so selection edits can recalculate dependencies without repeating the same API calls. It is discarded on a new analysis or worker shutdown. Run **Analyze pack** again to refresh provider data or retry an unavailable provider; entries evicted by the size bound may require another request. JAR downloads are not cached by this snapshot. The independent Linux API is unchanged.
+
+The interface links to [hhhhhffd/modpacks-migrator](https://github.com/hhhhhffd/modpacks-migrator) and its author [hhhhhffd](https://github.com/hhhhhffd). Manrope and IBM Plex Mono are self-hosted; their SIL Open Font License notices are included in `web/public/fonts/`.
 
 To build without CurseForge, use `npm --prefix web run build:wasm:no-default` instead. Modrinth remains available. Do not run this command over a generated CF-enabled package unless you intend to disable that provider.
 
